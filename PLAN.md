@@ -51,3 +51,11 @@ Different mechanism from the items work. Sleep is an interaction on a bed actor,
 Recommended route, pak-only: edit `BP_Stalker2Bonfire` (a real Blueprint) in ZoneKit and add a bed child actor or `BedHoldComponent` so every campfire gets a hold-E "Sleep" prompt next to the single-click "Sit". Reuses the game's own sleep flow.
 
 Risks: `BedHoldComponent` may require a `BedView` owner (C++ cast); bed GUID / save-state for a synthetic bed per campfire; lie-down anim and `sleep_teleport_min_distance` wake-up placement near the fire; sleep is entered from standing, not from the seated pose (chaining sit into sleep is out of scope).
+
+### Alternative: synthetic "campfire rest" (no bed system)
+UE4SS DLL, gated on `PC.contextual_action`, key-triggered from the WndProc hook. Sequence: fade out, advance clock 6h, refill rest, fade in.
+- Rest stat: `Obj.get_current_sleepiness_points()` / `set_current_sleepiness_points()` (`bp_api_dump2.txt:4877`, `:5064`). Hunger/thirst/psy setters sit next to them if the rest should cost food/water.
+- Fade: stock `PlayerCameraManager.StartCameraFade` (the dialogue mod already caches the camera manager).
+- Time skip: no BP-exposed setter. A native TimeManager exists (`CoreVariables.cfg:18-25`, `RealToGameTimeCoef = 24` at `:27`) and quest node `EQuestNodeType::SetTime` takes hours+minutes (`bp_api_dump2.txt:533`), so a native set-time UFunction exists. Find it at runtime: UE4SS Live View or Lua probe, list objects whose class name contains "Time" and their functions. `WeatherConsoleCommands` (`:7404`, CheatManagerExtension) may also expose a time console command runnable via `ExecuteConsoleCommand`.
+- Blockers to re-implement from `ObjSleepParamsPrototypes.cfg`: `AllowSleepThreshold = 50`, no emission, none of the `*NoSleep` effects active.
+- Not covered by a fake sleep: A-Life / world catch-up, safe-wake teleport. Weather is time-driven and should follow. NPC schedules and emission timers after a 6h jump need an in-game test.
