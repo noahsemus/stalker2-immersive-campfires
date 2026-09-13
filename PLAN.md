@@ -39,3 +39,15 @@ Reuse `PatchDialogInputMapping` (ImmersiveDialogue `dllmain.cpp` L3055-3139) aga
 2. Close PDA: player must still be seated with the camera clamp intact and `IA_PlayerCAExit` (stand up) still working.
 3. Stand up, then confirm normal exploration input is unchanged.
 4. Check `ue4ss\UE4SS.log` for any `[CampfireActions]` lines (Layer 2 only) and `ue4ss\crash_*.dmp`.
+
+## Stretch: sleeping at a campfire
+
+Different mechanism from the items work. Sleep is an interaction on a bed actor, not a pawn action:
+- `BedView` (`UIDActor_Bed > Actor`, `bp_api_dump2.txt:1704`) owns a `BedHoldComponent` (`HoldComponent`, `:1702`); callbacks `on_sleep_started` / `on_sleep_ended`; `set_interactive_state(bool)`.
+- The hold-E flow plays the lie-down anim (`AnimNotify_BedInteract`, `:1260`), opens `W_SleepView` (`CoreVariables.cfg:945`), pushes `IMC_Sleep` (Exclusive, `InputMappingContextPrototypes.cfg:87-93`), fades and skips time.
+- Blockers live in `ObjSleepParamsPrototypes.cfg`: `AllowSleepThreshold = 50`, `bAllowEmissionSleep = false`, `CantSleepEffectSIDs = {Radiation, Bleeding, Psy, Hunger}NoSleep`. These apply wherever sleep is triggered.
+- `PC` exposes no start-sleep function (only `Obj.is_sleeping()`), so a UE4SS mod cannot invoke sleep directly.
+
+Recommended route, pak-only: edit `BP_Stalker2Bonfire` (a real Blueprint) in ZoneKit and add a bed child actor or `BedHoldComponent` so every campfire gets a hold-E "Sleep" prompt next to the single-click "Sit". Reuses the game's own sleep flow.
+
+Risks: `BedHoldComponent` may require a `BedView` owner (C++ cast); bed GUID / save-state for a synthetic bed per campfire; lie-down anim and `sleep_teleport_min_distance` wake-up placement near the fire; sleep is entered from standing, not from the seated pose (chaining sit into sleep is out of scope).
