@@ -1,0 +1,1 @@
+/ImmersiveCampfires/_Stalker_2/data/input/InputMappingContexts/IMC_PlayerCA

@@ -1,7 +1,24 @@
+# Build trees / caches
 Output/
-RE-UE4SS/
-*.dll
+build/
+out/
+.vs/
+*.suo
+*.user
+
+# Paks and zips are ignored except checkpoint/release builds
 *.pak
 *.ucas
 *.utoc
 *.zip
+!zonekit/builds/**
+
+# Binaries (dev-box UE4SS probe only)
+*.dll
+*.pdb
+RE-UE4SS/
+
+# OS cruft
+Thumbs.db
+Desktop.ini
+.DS_Store
