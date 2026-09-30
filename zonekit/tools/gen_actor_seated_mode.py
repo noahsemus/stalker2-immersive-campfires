@@ -337,9 +337,13 @@ def body_release(x, y, pc_pin, prev, label):
     cr = make_rot(x + 600, y + 450, self_get("CamRelP", "real", x + 450, y + 550, subcat="double"),
                   self_get("CamRelY", "real", x + 450, y + 650, subcat="double"))
     c = set_rot("K2_SetRelativeRotation", x + 800, y, cam_, cr, "")
+    shd_ = other_get(PC, "ShadowMeshComponent", "object", x + 900, y + 300, pc_pin, sub=SKM)
+    sh = set_rot("K2_SetRelativeRotation", x + 1100, y, shd_,
+                 make_rot(x + 950, y + 450, yaw_pin=self_get("ShadowRelY", "real", x + 800, y + 550, subcat="double")), f"shadow follows the actor again ({label})")
+    hk = self_set("CamUnhooked", "bool", x + 1400, y, "camera hooked", default="false")
     g.link(prev["then"], m["execute"])
-    chain(m, a, c)
-    return c
+    chain(m, a, c, sh, hk)
+    return hk
 
 
 def play_rest(x, y, comment, prev, blend_in=0.35):
@@ -755,7 +759,15 @@ scp = self_set("CamRelP", "real", X2 + 1800, Y2 - 450, "camera's own rotation (p
 g.link(crb["Pitch"], scp["CamRelP"])
 scy = self_set("CamRelY", "real", X2 + 2050, Y2 - 450, "camera's own rotation (yaw)", subcat="double")
 g.link(crb["Yaw"], scy["CamRelY"])
-chain(save_t, save_y, rst, hide, fovr, inp, rwt, scp, scy, yaw_off)
+shd2 = other_get(PC, "ShadowMeshComponent", "object", X2 + 2200, Y2 - 850, as_pc, sub=SKM)
+srr = other_get(SC_, "RelativeRotation", "struct", X2 + 2350, Y2 - 850, shd2, sub=ROT)
+srb = lib_pure(KML, "KismetMathLibrary", "BreakRotator", X2 + 2500, Y2 - 850,
+               [("InRot", "struct", dict(sub=ROT)), ("Roll", "real", dict(subcat="float", out=True)),
+                ("Pitch", "real", dict(subcat="float", out=True)), ("Yaw", "real", dict(subcat="float", out=True))])
+g.link(srr, srb["InRot"])
+ssy = self_set("ShadowRelY", "real", X2 + 2300, Y2 - 450, "shadow's own yaw", subcat="double")
+g.link(srb["Yaw"], ssy["ShadowRelY"])
+chain(save_t, save_y, rst, hide, fovr, inp, rwt, scp, scy, ssy, yaw_off)
 
 self_n = Node(g, BG + "K2Node_Self", nm("K2Node_Self"), X2 + 2000, Y2 + 300, "")
 self_n.pin("self", "object", subcat="self", out=True)
@@ -1050,13 +1062,29 @@ mesh4 = other_get(CHAR, "Mesh", "object", X4 + 1900, Y4 + 150, as_pc, sub=SKM)
 hold = set_rot("K2_SetWorldRotation", X4 + 2000, Y4 - 350, mesh4,
                make_rot(X4 + 1850, Y4 - 500, yaw_pin=self_get("SeatYaw", "real", X4 + 1700, Y4 - 500, subcat="double")), "body stays facing the seat")
 g.link(br4r["then"], hold["execute"])
+# the shadow body is its own component under the actor (build 36: a second shadow turned with the view)
+shd4 = other_get(PC, "ShadowMeshComponent", "object", X4 + 2100, Y4 - 700, as_pc, sub=SKM)
+yaw_sh = dbl_add = lib_pure(KML, "KismetMathLibrary", "Add_DoubleDouble", X4 + 2000, Y4 - 850,
+                            [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                             ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(self_get("SeatYaw", "real", X4 + 1850, Y4 - 850, subcat="double"), dbl_add["A"])
+g.link(self_get("ShadowRelY", "real", X4 + 1850, Y4 - 750, subcat="double"), dbl_add["B"])
+hsh = set_rot("K2_SetWorldRotation", X4 + 2300, Y4 - 700, shd4, make_rot(X4 + 2150, Y4 - 850, yaw_pin=dbl_add["ReturnValue"]), "shadow stays with the body")
+g.link(hold["then"], hsh["execute"])
 cam4 = cam_of(X4 + 2100, Y4 + 150, as_pc)
-unh = set_abs_rot(X4 + 2300, Y4 - 350, cam4, "true", "camera unhooked from the body")
-g.link(hold["then"], unh["execute"])
-view = set_rot("K2_SetWorldRotation", X4 + 2600, Y4 - 350, cam4,
-               make_rot(X4 + 2450, Y4 - 500, pitch_pin=pna["ReturnValue"], yaw_pin=cbrk["Yaw"]), "camera = the view")
-g.link(unh["then"], view["execute"])
-rel4 = body_release(X4 + 2000, Y4 + 350, as_pc, {"then": br4r["else"]}, "free arms")
+bru = branch(X4 + 2600, Y4 - 700, "camera still hooked?", b_not(X4 + 2500, Y4 - 550, self_get("CamUnhooked", "bool", X4 + 2350, Y4 - 550)))
+g.link(hsh["then"], bru["execute"])
+unh = set_abs_rot(X4 + 2900, Y4 - 700, cam4, "true", "camera unhooked from the body (once)")
+g.link(bru["then"], unh["execute"])
+unf = self_set("CamUnhooked", "bool", X4 + 3200, Y4 - 700, "camera unhooked", default="true")
+g.link(unh["then"], unf["execute"])
+view = set_rot("K2_SetWorldRotation", X4 + 3500, Y4 - 350, cam4,
+               make_rot(X4 + 3350, Y4 - 500, pitch_pin=pna["ReturnValue"], yaw_pin=cbrk["Yaw"]), "camera = the view")
+g.link(unf["then"], view["execute"])
+g.link(bru["else"], view["execute"])
+brh4 = branch(X4 + 1900, Y4 + 350, "camera unhooked? (free arms)", self_get("CamUnhooked", "bool", X4 + 1750, Y4 + 500))
+g.link(br4r["else"], brh4["execute"])
+rel4 = body_release(X4 + 2000, Y4 + 650, as_pc, {"then": brh4["then"]}, "free arms, once")
 
 # =====================================================================
 # Stand up: move / jump / interact
