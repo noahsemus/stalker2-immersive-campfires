@@ -449,3 +449,12 @@ Stand-up and guitar end with `EquipLastHeldItem`.
   C++ default 1.0. Build 32: SetPosition(target - DeltaSeconds * rate).
 - Can't walk after a guitar round trip: move input not ignored, walking mode (probe `move`); `IMC_PlayerCA` (WASD =
   leave the sit) stays applied. Build 31: stand-up removes it.
+
+## 2026-09-30 — build 32 result (Noah: best build by far)
+
+Camera smooth (stutter gone: position compensation + a 0.0001 pause rate that survives the paste; probe `@0.00`),
+items good, guitar: stays seated, no camera jank, put away returns to our seated mode, walking after standing works
+(IMC_PlayerCA removed on stand). Open: after an item the look "drops input" briefly about every second; the game
+re-equips the pistol after an item (`MG_fp_udp_equip`, hand 1) and it shows until the resting pose hides it; the body
+turns for a moment when the guitar comes out (the vanilla montage faces the actor = view direction, then the vanilla
+sit turns to the seat).

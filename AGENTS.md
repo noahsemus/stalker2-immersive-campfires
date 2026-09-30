@@ -20,9 +20,10 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   keys) at rest, `AS_ImmCamp_SitAdditive` (additive on the item stance `fp_ar_idle_stand`) while an item / PDA /
   backpack montage runs. Noah confirmed: legs stay put, drink / PDA / backpack / PIR stimpak centred, W stands up,
   pistol back, guitar comes out, putting it away returns to the seated mode.
-- 2026-09-30 build 32 (in test, not confirmed): pose position compensated for the anim update's advance (the pause
-  never held: stutter / vibrating legs / body sweeps during items). Open: camera whip on G, can't walk after a
-  guitar round trip (build 31 removes `IMC_PlayerCA` on stand), sleep not started.
+- 2026-09-30 build 32: pose position compensated for the anim update's advance; the paused rate (0.0001, pasted 0.0
+  reverts to 1.0) now holds too. Noah: "best build by far": camera smooth, items good, guitar stays seated and returns
+  to the seated mode, walking after standing works. Open: brief input drop every ~1 s after an item, pistol shown
+  for a moment after an item (game re-equips it), a short body turn when the guitar comes out, sleep not started.
 
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
