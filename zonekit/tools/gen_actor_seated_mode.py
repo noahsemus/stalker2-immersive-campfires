@@ -767,7 +767,9 @@ srb = lib_pure(KML, "KismetMathLibrary", "BreakRotator", X2 + 2500, Y2 - 850,
 g.link(srr, srb["InRot"])
 ssy = self_set("ShadowRelY", "real", X2 + 2300, Y2 - 450, "shadow's own yaw", subcat="double")
 g.link(srb["Yaw"], ssy["ShadowRelY"])
-chain(save_t, save_y, rst, hide, fovr, inp, rwt, scp, scy, ssy, yaw_off)
+sby0 = self_set("BodyYaw", "real", X2 + 2500, Y2 - 450, "body facing = the seat", subcat="double")
+g.link(brk["Yaw"], sby0["BodyYaw"])
+chain(save_t, save_y, rst, hide, fovr, inp, rwt, scp, scy, ssy, sby0, yaw_off)
 
 self_n = Node(g, BG + "K2Node_Self", nm("K2Node_Self"), X2 + 2000, Y2 + 300, "")
 self_n.pin("self", "object", subcat="self", out=True)
@@ -971,7 +973,7 @@ g.link(crot["ReturnValue"], cbrk["InRot"])
 dyaw = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X4 + 600, Y4 + 500,
                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
                  ("ReturnValue", "real", dict(subcat="double", out=True))])
-g.link(cbrk["Yaw"], dyaw["A"])
+g.link(self_get("BodyYaw", "real", X4 + 450, Y4 + 550, subcat="double"), dyaw["A"])
 g.link(self_get("SeatYaw", "real", X4 + 450, Y4 + 650, subcat="double"), dyaw["B"])
 nax = lib_pure(KML, "KismetMathLibrary", "NormalizeAxis", X4 + 850, Y4 + 500,
                [("Angle", "real", dict(subcat="float", extra='DefaultValue="0.0",')), ("ReturnValue", "real", dict(subcat="float", out=True))])
@@ -995,7 +997,7 @@ def dpin(n, default="0.0"):
 
 RET = ("ReturnValue", "real", dict(subcat="double", out=True))
 ycl = kml("FClamp", X4 + 1100, Y4 + 800, [dpin("Value"), dpin("Min", "-75.0"), dpin("Max", "75.0"), RET])
-# (ycl Value left at 0: the rest pose is always the seat-facing row)
+g.link(nax["ReturnValue"], ycl["Value"])
 yad = kml("Add_DoubleDouble", X4 + 1300, Y4 + 800, [dpin("A"), dpin("B", "75.0"), RET])
 g.link(ycl["ReturnValue"], yad["A"])
 yrd = kml("GridSnap_Float", X4 + 1500, Y4 + 800, [dpin("Location"), dpin("GridSize", "0.25"), RET])
@@ -1054,37 +1056,88 @@ pz4 = member_call(ANIMI, "Montage_SetPlayRate", X4 + 1150, Y4 - 150, anim, "keep
     ("Montage", "object", dict(sub=MONTCLS)), ("NewPlayRate", "real", dict(subcat="float", extra='DefaultValue="0.000100",'))])
 pz4.pins["Montage"].const = True
 g.link(self_get("PoseMontage", "object", X4 + 1000, Y4 + 150, sub=MONTCLS), pz4["Montage"])
-g.link(c4c["then"], pz4["execute"])
+actor_yaw = cbrk["Yaw"]
+targ = kml("SelectFloat", X4 + 700, Y4 - 700, [dpin("A"), dpin("B"), ("bPickA", "bool", dict(extra='DefaultValue="false",')), RET])
+g.link(actor_yaw, targ["A"])
+g.link(self_get("SeatYaw", "real", X4 + 550, Y4 - 600, subcat="double"), targ["B"])
+g.link(self_get("PoseAdditive", "bool", X4 + 550, Y4 - 500), targ["bPickA"])
+dd = kml("Subtract_DoubleDouble", X4 + 900, Y4 - 700, [dpin("A"), dpin("B"), RET])
+g.link(targ["ReturnValue"], dd["A"])
+g.link(self_get("BodyYaw", "real", X4 + 750, Y4 - 800, subcat="double"), dd["B"])
+dn = kml("NormalizeAxis", X4 + 1100, Y4 - 700, [("Angle", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
+                                                ("ReturnValue", "real", dict(subcat="float", out=True))])
+g.link(dd["ReturnValue"], dn["Angle"])
+al = kml("Multiply_DoubleDouble", X4 + 900, Y4 - 900, [dpin("A"), dpin("B", "10.0"), RET])
+g.link(tick["DeltaSeconds"], al["A"])
+alc = kml("FMin", X4 + 1100, Y4 - 900, [dpin("A"), dpin("B", "1.0"), RET])
+g.link(al["ReturnValue"], alc["A"])
+stp = kml("Multiply_DoubleDouble", X4 + 1300, Y4 - 800, [dpin("A"), dpin("B"), RET])
+g.link(dn["ReturnValue"], stp["A"])
+g.link(alc["ReturnValue"], stp["B"])
+eased = kml("Add_DoubleDouble", X4 + 1500, Y4 - 800, [dpin("A"), dpin("B"), RET])
+g.link(self_get("BodyYaw", "real", X4 + 1350, Y4 - 900, subcat="double"), eased["A"])
+g.link(stp["ReturnValue"], eased["B"])
+# once the camera is back on the head during an action, the body follows the view exactly
+follow = kml("SelectFloat", X4 + 1700, Y4 - 800, [dpin("A"), dpin("B"), ("bPickA", "bool", dict(extra='DefaultValue="false",')), RET])
+g.link(actor_yaw, follow["A"])
+g.link(eased["ReturnValue"], follow["B"])
+g.link(b_and(X4 + 1550, Y4 - 650, self_get("PoseAdditive", "bool", X4 + 1400, Y4 - 650),
+             b_not(X4 + 1400, Y4 - 580, self_get("CamUnhooked", "bool", X4 + 1250, Y4 - 580))), follow["bPickA"])
+sby = self_set("BodyYaw", "real", X4 + 1900, Y4 - 1000, "body facing: eased", subcat="double")
+g.link(follow["ReturnValue"], sby["BodyYaw"])
+g.link(c4c["then"], sby["execute"])
+g.link(sby["then"], pz4["execute"])
 g.link(pz4["then"], setpos["execute"])
-br4r = branch(X4 + 1700, Y4 - 150, "resting? (hold the body)", b_not(X4 + 1600, Y4 + 100, self_get("PoseAdditive", "bool", X4 + 1450, Y4 + 100)))
-g.link(setpos["then"], br4r["execute"])
 mesh4 = other_get(CHAR, "Mesh", "object", X4 + 1900, Y4 + 150, as_pc, sub=SKM)
-hold = set_rot("K2_SetWorldRotation", X4 + 2000, Y4 - 350, mesh4,
-               make_rot(X4 + 1850, Y4 - 500, yaw_pin=self_get("SeatYaw", "real", X4 + 1700, Y4 - 500, subcat="double")), "body stays facing the seat")
-g.link(br4r["then"], hold["execute"])
+by4 = self_get("BodyYaw", "real", X4 + 1700, Y4 - 500, subcat="double")
+hold = set_rot("K2_SetWorldRotation", X4 + 2000, Y4 - 350, mesh4, make_rot(X4 + 1850, Y4 - 500, yaw_pin=by4), "body facing = BodyYaw")
+g.link(setpos["then"], hold["execute"])
 # the shadow body is its own component under the actor (build 36: a second shadow turned with the view)
 shd4 = other_get(PC, "ShadowMeshComponent", "object", X4 + 2100, Y4 - 700, as_pc, sub=SKM)
-yaw_sh = dbl_add = lib_pure(KML, "KismetMathLibrary", "Add_DoubleDouble", X4 + 2000, Y4 - 850,
-                            [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
-                             ("ReturnValue", "real", dict(subcat="double", out=True))])
-g.link(self_get("SeatYaw", "real", X4 + 1850, Y4 - 850, subcat="double"), dbl_add["A"])
+dbl_add = lib_pure(KML, "KismetMathLibrary", "Add_DoubleDouble", X4 + 2000, Y4 - 850,
+                   [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                    ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(by4, dbl_add["A"])
 g.link(self_get("ShadowRelY", "real", X4 + 1850, Y4 - 750, subcat="double"), dbl_add["B"])
-hsh = set_rot("K2_SetWorldRotation", X4 + 2300, Y4 - 700, shd4, make_rot(X4 + 2150, Y4 - 850, yaw_pin=dbl_add["ReturnValue"]), "shadow stays with the body")
+hsh = set_rot("K2_SetWorldRotation", X4 + 2300, Y4 - 700, shd4, make_rot(X4 + 2150, Y4 - 850, yaw_pin=dbl_add["ReturnValue"]), "shadow with the body")
 g.link(hold["then"], hsh["execute"])
+# aligned = action pose and the body within 1 deg of the view
+off4 = kml("Subtract_DoubleDouble", X4 + 2200, Y4 + 500, [dpin("A"), dpin("B"), RET])
+g.link(actor_yaw, off4["A"])
+g.link(by4, off4["B"])
+offn = kml("NormalizeAxis", X4 + 2400, Y4 + 500, [("Angle", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
+                                                 ("ReturnValue", "real", dict(subcat="float", out=True))])
+g.link(off4["ReturnValue"], offn["Angle"])
+offa = kml("Abs", X4 + 2600, Y4 + 500, [dpin("A"), RET])
+g.link(offn["ReturnValue"], offa["A"])
+near = kml("Less_DoubleDouble", X4 + 2800, Y4 + 500, [dpin("A"), dpin("B", "1.0"), ("ReturnValue", "bool", dict(out=True))])
+g.link(offa["ReturnValue"], near["A"])
+bral = branch(X4 + 2600, Y4 - 150, "action and body faces the view?",
+              b_and(X4 + 2900, Y4 + 350, self_get("PoseAdditive", "bool", X4 + 2750, Y4 + 300), near["ReturnValue"]))
+g.link(hsh["then"], bral["execute"])
 cam4 = cam_of(X4 + 2100, Y4 + 150, as_pc)
-bru = branch(X4 + 2600, Y4 - 700, "camera still hooked?", b_not(X4 + 2500, Y4 - 550, self_get("CamUnhooked", "bool", X4 + 2350, Y4 - 550)))
-g.link(hsh["then"], bru["execute"])
-unh = set_abs_rot(X4 + 2900, Y4 - 700, cam4, "true", "camera unhooked from the body (once)")
+# not aligned: camera unhooked (once), pointed at the view every tick
+bru = branch(X4 + 2900, Y4 - 700, "camera still hooked?", b_not(X4 + 2800, Y4 - 550, self_get("CamUnhooked", "bool", X4 + 2650, Y4 - 550)))
+g.link(bral["else"], bru["execute"])
+unh = set_abs_rot(X4 + 3200, Y4 - 700, cam4, "true", "camera unhooked from the body (once)")
 g.link(bru["then"], unh["execute"])
-unf = self_set("CamUnhooked", "bool", X4 + 3200, Y4 - 700, "camera unhooked", default="true")
+unf = self_set("CamUnhooked", "bool", X4 + 3500, Y4 - 700, "camera unhooked", default="true")
 g.link(unh["then"], unf["execute"])
-view = set_rot("K2_SetWorldRotation", X4 + 3500, Y4 - 350, cam4,
-               make_rot(X4 + 3350, Y4 - 500, pitch_pin=pna["ReturnValue"], yaw_pin=cbrk["Yaw"]), "camera = the view")
+view = set_rot("K2_SetWorldRotation", X4 + 3800, Y4 - 350, cam4,
+               make_rot(X4 + 3650, Y4 - 500, pitch_pin=pna["ReturnValue"], yaw_pin=actor_yaw), "camera = the view")
 g.link(unf["then"], view["execute"])
 g.link(bru["else"], view["execute"])
-brh4 = branch(X4 + 1900, Y4 + 350, "camera unhooked? (free arms)", self_get("CamUnhooked", "bool", X4 + 1750, Y4 + 500))
-g.link(br4r["else"], brh4["execute"])
-rel4 = body_release(X4 + 2000, Y4 + 650, as_pc, {"then": brh4["then"]}, "free arms, once")
+# aligned: camera back on the head (once); from then on the body follows the view exactly (BodyYaw above)
+brh4 = branch(X4 + 2900, Y4 + 150, "camera unhooked? (action)", self_get("CamUnhooked", "bool", X4 + 2750, Y4 + 200))
+g.link(bral["then"], brh4["execute"])
+cr4 = make_rot(X4 + 3100, Y4 + 450, self_get("CamRelP", "real", X4 + 2950, Y4 + 550, subcat="double"),
+               self_get("CamRelY", "real", X4 + 2950, Y4 + 650, subcat="double"))
+hk1 = set_abs_rot(X4 + 3200, Y4 + 150, cam4, "false", "camera back on the head")
+g.link(brh4["then"], hk1["execute"])
+hk2 = set_rot("K2_SetRelativeRotation", X4 + 3500, Y4 + 150, cam4, cr4, "")
+g.link(hk1["then"], hk2["execute"])
+hk3 = self_set("CamUnhooked", "bool", X4 + 3800, Y4 + 150, "camera hooked", default="false")
+g.link(hk2["then"], hk3["execute"])
 
 # =====================================================================
 # Stand up: move / jump / interact

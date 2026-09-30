@@ -207,7 +207,10 @@ public:
         int moveIgn = -1, mode = -1; UObject* ctl = ObjProp(pawn, STR("Controller")); UObject* cmc = ObjProp(pawn, STR("CharacterMovement"));
         if (ctl) moveIgn = CallBool(ctl, STR("IsMoveInputIgnored"));
         if (cmc) if (FProperty* mp = cmc->GetPropertyByNameInChain(STR("MovementMode"))) { uint8_t* v = mp->ContainerPtrToValuePtr<uint8_t>(cmc); if (v) mode = *v; }
-        swprintf_s(b, 640, L"moveIgnored=%d moveMode=%d", moveIgn, mode);
+        int camAbs = -1; FR camRel{};
+        if (cam) { if (FProperty* p = cam->GetPropertyByNameInChain(STR("bAbsoluteRotation"))) if (FBoolProperty* bp = CastField<FBoolProperty>(p)) { uint8_t* raw = p->ContainerPtrToValuePtr<uint8_t>(cam); if (raw) camAbs = bp->GetPropertyValue(raw) ? 1 : 0; }
+                   if (FProperty* p = cam->GetPropertyByNameInChain(STR("RelativeRotation"))) { FR* v = p->ContainerPtrToValuePtr<FR>(cam); if (v) camRel = *v; } }
+        swprintf_s(b, 640, L"moveIgnored=%d moveMode=%d camAbs=%d camRel=(%.1f,%.1f,%.1f) lookIgnored=%d", moveIgn, mode, camAbs, camRel.P, camRel.Y, camRel.R, ctl ? CallBool(ctl, STR("IsLookInputIgnored")) : -1);
         Output::send<LogLevel::Verbose>(STR("[CampProbe] move {}\n"), StringType(b));
         swprintf_s(b, 640, L"hand=%d hasMain=%d leftBusy=%d equippedNone=%d pda=%d bag=%d",
             CallByte(pawn, STR("GetMainHandEquipType")), CallBool(pawn, STR("HasItemInMainHand")), CallBool(pawn, STR("IsLeftHandBusy")),
@@ -272,6 +275,33 @@ public:
             if (!m_gMoving) m_gMoveStart = now;
             m_gMoving = true; m_gChange = now; m_gLast = cr;
         } else if (m_gMoving && now - m_gChange >= 400) m_gMoving = false;
+        // dropped input: the pawn says it had camera input last tick but ControlRotation did not move; hitches:
+        // world delta seconds. Summarised once a second (counts), not per frame.
+        {
+            static uint64_t s_lastSum = 0; static int s_upd = 0, s_inputTicks = 0, s_dropTicks = 0, s_hitch = 0; static double s_maxDt = 0;
+            static FR s_prev{}; static bool s_prevHad = false;
+            bool had = false; FR lci{};
+            FProperty* hp = m_cPawn->GetPropertyByNameInChain(STR("bHadCameraInputLastTick")); if (!hp) hp = m_cPawn->GetPropertyByNameInChain(STR("HadCameraInputLastTick"));
+            if (FProperty* p = hp) if (FBoolProperty* bp = CastField<FBoolProperty>(p)) { uint8_t* raw = p->ContainerPtrToValuePtr<uint8_t>(m_cPawn); if (raw) had = bp->GetPropertyValue(raw); }
+            if (FProperty* p = m_cPawn->GetPropertyByNameInChain(STR("LastCameraInput"))) { FR* v = p->ContainerPtrToValuePtr<FR>(m_cPawn); if (v) lci = *v; }
+            double dt = -1;
+            static UFunction* s_wds = nullptr; static UObject* s_gs = nullptr;
+            if (!s_gs) { s_gs = UObjectGlobals::StaticFindObject<UObject*>(nullptr, nullptr, STR("/Script/Engine.Default__GameplayStatics")); if (s_gs) s_wds = s_gs->GetFunctionByNameInChain(FName(STR("GetWorldDeltaSeconds"))); }
+            if (s_gs && s_wds) { struct { UObject* W; double R; } q{}; q.W = m_cPawn; if (GuardedPE(s_gs, s_wds, &q)) dt = q.R; }
+            s_upd++;
+            bool moved = fabs(cr.Y - s_prev.Y) > 1e-5 || fabs(cr.P - s_prev.P) > 1e-5;
+            bool inputNonZero = fabs(lci.Y) > 1e-4 || fabs(lci.P) > 1e-4;
+            if (had && inputNonZero) { s_inputTicks++; if (!moved && s_prevHad) s_dropTicks++; }
+            s_prevHad = had && inputNonZero; s_prev = cr;
+            if (dt > s_maxDt) s_maxDt = dt;
+            if (dt > 0.045) s_hitch++;
+            if (now - s_lastSum >= 1000) {
+                if (s_inputTicks > 0 || s_hitch > 0)
+                    Output::send<LogLevel::Verbose>(STR("[CampProbe] look1s seated={} updates={} inputTicks={} stalledWithInput={} hitchUpdates={} maxDt={}ms lci=({},{})\n"),
+                        m_bSeated, s_upd, s_inputTicks, s_dropTicks, s_hitch, (int)(s_maxDt * 1000), (int)(lci.P * 100), (int)(lci.Y * 100));
+                s_lastSum = now; s_upd = s_inputTicks = s_dropTicks = s_hitch = 0; s_maxDt = 0;
+            }
+        }
         int ign = CallBool(ctl, STR("IsLookInputIgnored"));
         if (ign != m_gIgnLook) { Output::send<LogLevel::Verbose>(STR("[CampProbe] lookIgnored={} t={}\n"), ign, now % 100000); m_gIgnLook = ign; }
     }
