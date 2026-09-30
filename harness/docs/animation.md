@@ -1,0 +1,64 @@
+# Player animation: what is known
+
+Mostly from ImmersiveDialogue 2.0-2.1 (walk in dialogue, arms, gestures) and ImmersiveCampfires (own seated mode).
+
+## Structure
+- The player mesh's main anim instance is `AnimBP_Player` (parent `AnimInstancePlayer`, native). Its native update
+  pushes ~23 BlueprintReadWrite data structs (`StateData`, `LocomotionData`, `CameraData`, ...) into the main
+  instance only. The struct members are mostly **not** Blueprint-writable (`Set members in AnimPlayerStateData`
+  exposes only `CombatIdleDuration`), so a mod computes its own values and reroutes bindings instead of writing them.
+- Weapon / hands poses are composed in **linked anim layers** (e.g. `WeaponLayer` → `AnimBP_player_bh` for bare
+  hands; weapon-specific layer BPs for guns). Idle / Moving poses come out of that layer.
+- Slots: `FullBody` sits **after everything** in `AnimBP_Player` (`PreFullBodyPose` cache → Slot FullBody →
+  LayeredBoneBlend with no layers → out), so any FullBody montage hides the arm-action layers
+  (`PreActionFullbodySlot` → `MainActionSlot` / `UpperBody` inside the bh layer). Item use (eat, drink, PDA,
+  backpack) plays in MainActionSlot / DefaultSlot / UpperBody.
+- Dialogue gestures are montages on the main instance (`IsAnyMontagePlaying` true). Linked layers with
+  `bUseMainInstanceMontageEvaluationData` read montage data from the component's main instance.
+- The camera hangs off `jnt_camera` (child of `jnt_root`, not the head). With `bUseControllerRotationYaw` off only
+  the aim offset turns, not the camera.
+- Curves such as `AdditiveMovingUpperBody` read 0 on all instances (not a usable signal).
+
+## Safe ways to change animation without overriding `AnimBP_Player`
+- **Post-process anim instance** (ImmersiveDialogue 2.1): a mod ABP (parent `AnimInstancePlayer`, not plain
+  `AnimInstance`) attached with `SetOverridePostProcessAnimBP`, switched with `SetDisablePostProcessBlueprint`. A
+  disabled post-process instance is neither updated nor evaluated. Copy the main instance's data structs onto it
+  every frame, and set its `WeaponLayer` node's Instance Class statically (`LinkAnimClassLayers` at init did not
+  take). **Attach exactly once per world, ~1 s after the pawn appears, outside any dialogue / interaction**, via the
+  mesh-swap trick: save hidden bones → override None → `Set Skeletal Mesh Asset` (another mesh) → override = ours →
+  mesh back → `ToggleFOVAndForegroundRender(true)` → re-hide the saved bones. Armour changes re-create it.
+- **Dynamic montages in the mod's own slot group** (ImmersiveCampfires): e.g. a looping additive made from a game
+  sequence (`AnimSequence` duplicated, tracks rewritten from Python, additive against a reference frame) played in
+  `FullBody` with its own slot group so UpperBody/action montages don't cancel it; heal with
+  `IsPlayingSlotAnimation`. Paused dynamic montages with the frame set per tick work as pose tables (sit yaw ×
+  pitch).
+- Rebinding pins inside an override (`Select Float` on our flag, rules OR'd with our flag) works but makes the
+  asset a conflict magnet; frozen-interface lesson in `compatibility.md`.
+
+## Crash families (do not retry)
+- `SetAnimInstanceClass` on the player mesh: `EXCEPTION_ACCESS_VIOLATION reading 0xa00` at once (native code keeps
+  the instance it created at spawn).
+- `SetOverridePostProcessAnimBP(..., Reinit=true)`: AV reading `0xac0` (reinit without waiting for the parallel anim
+  task).
+- **Any post-process swap during play that overlaps a native interaction** (contextual-action sit): AV in exec
+  thunks of `PC.IsVaulting` / `PC.HasNightVisionAnimation` (native code treats the post-process instance as the
+  player's `AnimInstancePlayer` while the interaction runs). Even swapping ImmersiveDialogue's own class back after a
+  sit crashed. Only the single swap at load is known safe.
+- Calling `GetCurrentStateName` / state-machine queries from outside the anim update (probe) faults.
+
+## Dead ends
+- Montage blend profiles as masks (UE 5.5 clears `ActiveBlendProfile` once the blend-in ends; BlendMask mode is not
+  handled for montages).
+- `DetectorLayer` (no input pose), a Linked Anim Graph pass-through (never offers an `In Pose` pin).
+- Recooking `AnimBP_player_bh` as an override breaks the unarmed sprint left-hand animation from a fresh load, even
+  with no edits. Duplicate it to a mod-only path instead.
+- `BS_fp_bh_walk` is the bare-hands arm additive, not locomotion.
+
+## Vanilla behaviour worth knowing
+- In static dialogue the native update keeps running but leaves `StateData.bMoving`, `bWalking`,
+  `LocomotionData.MovementPlayRate.{Right,Forward}` at 0 and sets `bWalkingOverride = 1`;
+  `StateData.bForceBindedHandsLookVertical` = 1 raises idle arms out of view (the vanilla "no arms in dialogue").
+- The campfire sit (`MG_fp_ca_gd_bonfire`, slot FullBody, sections In → Idle (loops) → Out) comes with
+  `AnimCollection_pca_bonfire` settings `bShouldLerpToInteractable`, `bShouldToggleFOV`: the sit turns the
+  first-person FOV / foreground render off and only its own exit turns it back on
+  (`ToggleFOVAndForegroundRender(true)` to restore; otherwise FP items render off-centre and the weapon vanishes).

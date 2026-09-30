@@ -1,27 +1,16 @@
-# Zone Kit tooling
+# Mod-specific tooling
 
-Copied from `stalker2-immersive-dialogue/zonekit/tools/` on 2026-09-27. All
-Python runs with the kit's embedded interpreter:
-`G:\Epic Games\STALKER2ZoneKit\Engine\Binaries\ThirdParty\Python3\Win64\python.exe`.
-Replace `<SCRATCH>` with a writable output folder.
+Generic tools (cook / install / revert, `ue_exec.py`, editor helpers, T3D libraries, pak readers) live in
+`harness/tools/` since the harness adoption on 2026-09-30; see `harness/README.md`. Python = the kit's embedded
+interpreter. The generators import `bp_t3d` / `bp_graph` / `t3d_lift` from `harness/tools/t3d/`.
 
-| Script | Where it runs | What it does |
+| Script | Runs | Does |
 |---|---|---|
-| `cook_and_install.ps1 [-Mod X]` | shell | `GSCCookMod` cook (5-6 min), waits for the game to close, then `install_paktest.ps1` |
-| `install_paktest.ps1 [-Mod X]` | shell, game closed | copies OverrideContent as `~mods\zzz_<Mod>_PakTest\zzz_<Mod>_30_P.*` (+ NewContent under its kit name) |
-| `revert_paktest.ps1` | shell, game closed | removes `zzz_ImmersiveCampfires*_PakTest` |
-| `dump_imc.py` | editor (headless or `ue_exec.py`) | mapping-context rows, modifiers, triggers, mappable names to JSON |
-| `make_imc_override.py` | headless editor | **template** (ImmersiveDialogue's `IMC_Dialog` generator): duplicate + moved-objects technique; derive `make_imc_playerca_override.py` from it |
-| `add_mappable_to_imc.py` | live editor via `ue_exec.py` | **template**: give override rows the game's mappable names in place |
-| `duplicate_asset.py`, `move_asset.py`, `set_bp_default.py` | headless editor, editor closed | asset duplicate / rename with referencer fixup / class-default set; edit SRC/DST first |
-| `ue_exec.py <file.py \| code>` | shell | runs Python in the open editor (remote execution is on in Project Settings) |
-| `dump_names.py` | shell | FName table / strings of an uncooked `.uasset` |
-| `zen_names.py <dir> [--imports]` | shell | names or imports of cooked packages (extract first: `UnrealPak <x>.utoc -Extract <dir>`) |
-| `extract_from_pak.py` | shell | uncooked assets out of `FullEditor-WindowsModEditor.pak` by index offset (needs `pak_index_subset.txt` from `UnrealPak <pak> -List`) |
-
-Headless editor command:
-```
-<kit>\Stalker2\Binaries\Win64\Stalker2ModEditor-Win64-Shipping-Cmd.exe "<kit>\Stalker2\Stalker2.uproject" -run=pythonscript -script=<file> -unattended -nosplash -stdout -NoShaderCompile
-```
-`classifier/ImmersiveCampfires/` holds the cook's package lists; copy them to
-`<kit>\Stalker2\SavedMods\PackageClassifier\ImmersiveCampfires\`.
+| `gen_actor_seated_mode.py <out.txt>` | shell | the whole `BP_ImmCampActor` event graph as paste text (current) |
+| `gen_subsystem_spawn.py` | shell | `BP_ImmCampSubsystem` spawn graph |
+| `make_sit_yaw.py` | open editor (`harness/tools/ue_exec.py`) | builds `AS_ImmCamp_SitRest` and `AS_ImmCamp_SitAdditive` (yaw / pitch tables) |
+| `make_imc_playerca_override.py` | headless editor | the `IMC_PlayerCA` override (vanilla + exploration rows + canary) |
+| `make_imc_override.py`, `add_mappable_to_imc.py` | templates | ImmersiveDialogue's IMC generators the override was derived from |
+| `gen_actor_seat_test.py`, `gen_actor_seated_input.py`, `gen_abp_seated_legs.py`, `make_sit_additive.py` | history | earlier builds (seat test, input-only actor, post-process ABP, additive v2); kept for the log |
+| `classifier/ImmersiveCampfires/` | cook | package lists (`harness/tools/cook_and_install.ps1` seeds / checks them) |
+| `probe/ImmCampProbeCpp/` | dev box | UE4SS C++ probe (body / hands / move / per-frame burst logging) |

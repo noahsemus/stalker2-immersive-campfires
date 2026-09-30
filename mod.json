@@ -1,0 +1,12 @@
+{
+    "name":  "ImmersiveCampfires",
+    "short":  "ImmCamp",
+    "repo":  "stalker2-immersive-campfires",
+    "description":  "Eat, drink, open the PDA and inventory, play the guitar and (planned) sleep while seated at a campfire.",
+    "release_pak_suffix":  20,
+    "dev_pak_suffix":  30,
+    "nexus_id":  null,
+    "optional_plugins":  [
+
+                         ]
+}
