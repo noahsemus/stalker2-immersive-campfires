@@ -37,6 +37,7 @@ ACTOR = cls("/Script/Engine.Actor")
 PAWN = cls("/Script/Engine.Pawn")
 OBJ = cls("/Script/CoreUObject.Object")
 OBJC = cls("/Script/Stalker2.Obj")
+SC_ = cls("/Script/Engine.SceneComponent")
 HANDENUM = "\"/Script/CoreUObject.Enum'/Script/Stalker2.EMainHandEquipmentType'\""
 GS = cls("/Script/Engine.GameplayStatics")
 KML = cls("/Script/Engine.KismetMathLibrary")
@@ -291,6 +292,54 @@ def play_additive(x, y, comment, prev, asset=None, blend_in=0.35):
     g.link(n["ReturnValue"], pz["Montage"])
     g.link(sv["then"], pz["execute"])
     return pz
+
+
+def make_rot(x, y, pitch_pin=None, yaw_pin=None, pitch="0.0", yaw="0.0"):
+    r = lib_pure(KML, "KismetMathLibrary", "MakeRotator", x, y,
+                 [("Roll", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
+                  ("Pitch", "real", dict(subcat="float", extra=f'DefaultValue="{pitch}",')),
+                  ("Yaw", "real", dict(subcat="float", extra=f'DefaultValue="{yaw}",')),
+                  ("ReturnValue", "struct", dict(sub=ROT, out=True))])
+    if pitch_pin is not None:
+        g.link(pitch_pin, r["Pitch"])
+    if yaw_pin is not None:
+        g.link(yaw_pin, r["Yaw"])
+    return r["ReturnValue"]
+
+
+def set_rot(kind, x, y, target, rot_pin, comment):
+    """kind: K2_SetWorldRotation / K2_SetRelativeRotation on a scene component."""
+    n = member_call(cls("/Script/Engine.SceneComponent"), kind, x, y, target, comment, [
+        ("NewRotation", "struct", dict(sub=ROT)), ("bSweep", "bool", dict(extra='DefaultValue="false",')),
+        ("SweepHitResult", "struct", dict(sub="\"/Script/CoreUObject.ScriptStruct'/Script/Engine.HitResult'\"", out=True)),
+        ("bTeleport", "bool", dict(extra='DefaultValue="true",'))])
+    g.link(rot_pin, n["NewRotation"])
+    return n
+
+
+def set_abs_rot(x, y, target, on, comment):
+    return member_call(cls("/Script/Engine.SceneComponent"), "SetAbsolute", x, y, target, comment, [
+        ("bNewAbsoluteLocation", "bool", dict(extra='DefaultValue="false",')),
+        ("bNewAbsoluteRotation", "bool", dict(extra=f'DefaultValue="{on}",')),
+        ("bNewAbsoluteScale", "bool", dict(extra='DefaultValue="false",'))])
+
+
+def cam_of(x, y, pc_pin):
+    return member_pure(PC, "GetCameraComponent", x, y, pc_pin, [("ReturnValue", "object", dict(sub=cls("/Script/Engine.CameraComponent"), out=True))])["ReturnValue"]
+
+
+def body_release(x, y, pc_pin, prev, label):
+    """Mesh back under the actor, camera back on its bone (relative rotation saved at the takeover)."""
+    mesh_ = other_get(CHAR, "Mesh", "object", x, y + 300, pc_pin, sub=SKM)
+    m = set_rot("K2_SetRelativeRotation", x + 200, y, mesh_, make_rot(x + 50, y + 450), f"body follows the actor again ({label})")
+    cam_ = cam_of(x + 300, y + 450, pc_pin)
+    a = set_abs_rot(x + 500, y, cam_, "false", f"camera back on the head ({label})")
+    cr = make_rot(x + 600, y + 450, self_get("CamRelP", "real", x + 450, y + 550, subcat="double"),
+                  self_get("CamRelY", "real", x + 450, y + 650, subcat="double"))
+    c = set_rot("K2_SetRelativeRotation", x + 800, y, cam_, cr, "")
+    g.link(prev["then"], m["execute"])
+    chain(m, a, c)
+    return c
 
 
 def play_rest(x, y, comment, prev, blend_in=0.35):
@@ -696,7 +745,17 @@ key_sync(tsq["then_0"])
 g.link(tsq["then_1"], save_t["execute"])
 rwt = member_call(OBJC, "RemoveWeaponFromHands", X2 + 1050, Y2 - 200, as_pc, "weapon out of the hands")
 svs = member_call(PC, "SaveStatesBeforeInteraction", X2 + 1350, Y2 - 400, as_pc, "store the weapon like the vanilla sit")
-chain(save_t, save_y, rst, hide, fovr, inp, rwt, yaw_off)
+cam2 = cam_of(X2 + 1300, Y2 - 650, as_pc)
+crr = other_get(SC_, "RelativeRotation", "struct", X2 + 1450, Y2 - 650, cam2, sub=ROT)
+crb = lib_pure(KML, "KismetMathLibrary", "BreakRotator", X2 + 1650, Y2 - 650,
+               [("InRot", "struct", dict(sub=ROT)), ("Roll", "real", dict(subcat="float", out=True)),
+                ("Pitch", "real", dict(subcat="float", out=True)), ("Yaw", "real", dict(subcat="float", out=True))])
+g.link(crr, crb["InRot"])
+scp = self_set("CamRelP", "real", X2 + 1800, Y2 - 450, "camera's own rotation (pitch)", subcat="double")
+g.link(crb["Pitch"], scp["CamRelP"])
+scy = self_set("CamRelY", "real", X2 + 2050, Y2 - 450, "camera's own rotation (yaw)", subcat="double")
+g.link(crb["Yaw"], scy["CamRelY"])
+chain(save_t, save_y, rst, hide, fovr, inp, rwt, scp, scy, yaw_off)
 
 self_n = Node(g, BG + "K2Node_Self", nm("K2Node_Self"), X2 + 2000, Y2 + 300, "")
 self_n.pin("self", "object", subcat="self", out=True)
@@ -820,7 +879,7 @@ g.link(now3["ReturnValue"], lat["LastActionTime"])
 g.link(brb["then"], lat["execute"])
 brf = branch(X3 + 2400, Y3 - 200, "resting pose on?", b_not(X3 + 2300, Y3 - 50, self_get("PoseAdditive", "bool", X3 + 2200, Y3 - 50)))
 g.link(lat["then"], brf["execute"])
-paf = play_additive(X3 + 2700, Y3 - 200, "free arms (additive legs)", brf)
+paf = play_additive(X3 + 2700, Y3 - 200, "free arms (additive legs)", brf, None, 0.1)
 pa1 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 - 200, "pose: free arms", default="true")
 g.link(paf["then"], pa1["execute"])
 # idle: back to resting 0.4 s after the last busy tick; also heal a lost resting pose
@@ -872,7 +931,7 @@ g.link(away["then"], lpa["execute"])
 g.link(isq["then_1"], brr["execute"])
 brh = branch(X3 + 2550, Y3 + 200, "coming from free arms?", self_get("PoseAdditive", "bool", X3 + 2450, Y3 + 350))
 g.link(brr["then"], brh["execute"])
-pr = play_rest(X3 + 2700, Y3 + 200, "resting seated pose", {"then": brh["then"]})
+pr = play_rest(X3 + 2700, Y3 + 200, "resting seated pose", {"then": brh["then"]}, 0.1)
 prh = play_rest(X3 + 2700, Y3 + 450, "resting pose lost: back at once", {"then": brh["else"]}, 0.01)
 g.link(prh["then"], self_set("PoseAdditive", "bool", X3 + 3350, Y3 + 450, "pose: resting (heal)", default="false")["execute"])
 pa2 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 + 200, "pose: resting", default="false")
@@ -892,7 +951,7 @@ g.link(sq["then_4"], br4["execute"])
 pc4 = lib_pure(GS, "GameplayStatics", "GetPlayerController", X4 - 150, Y4 + 500,
                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("PlayerIndex", "int", dict(extra='DefaultValue="0",')),
                 ("ReturnValue", "object", dict(sub=cls("/Script/Engine.PlayerController"), out=True))])["ReturnValue"]
-crot = member_pure(PAWN, "GetControlRotation", X4 + 100, Y4 + 500, as_pc, [("ReturnValue", "struct", dict(sub=ROT, out=True))])
+crot = member_pure(ACTOR, "K2_GetActorRotation", X4 + 100, Y4 + 500, as_pc, [("ReturnValue", "struct", dict(sub=ROT, out=True))])
 cbrk = lib_pure(KML, "KismetMathLibrary", "BreakRotator", X4 + 350, Y4 + 500,
                 [("InRot", "struct", dict(sub=ROT)), ("Roll", "real", dict(subcat="float", out=True)),
                  ("Pitch", "real", dict(subcat="float", out=True)), ("Yaw", "real", dict(subcat="float", out=True))])
@@ -913,7 +972,7 @@ mrc = lib_pure(KML, "KismetMathLibrary", "MapRangeClamped", X4 + 1100, Y4 + 500,
                 ("OutRangeB", "real", dict(subcat="double", extra='DefaultValue="0.995",')),
                 ("ReturnValue", "real", dict(subcat="double", out=True))])
 g.link(nax["ReturnValue"], mrc["Value"])
-# resting table (build 22): position = Round(clamp(yaw) + 75) * 23/30 + (clamp(pitch) + 60) / 150
+# resting table: position = row * 23/30 + (clamp(pitch) + 60) / 150, row = snap(clamp(yaw) + 75, 0.25) / 0.25 (build 35)
 def kml(member, x, y, pins):
     return lib_pure(KML, "KismetMathLibrary", member, x, y, pins)
 
@@ -924,12 +983,12 @@ def dpin(n, default="0.0"):
 
 RET = ("ReturnValue", "real", dict(subcat="double", out=True))
 ycl = kml("FClamp", X4 + 1100, Y4 + 800, [dpin("Value"), dpin("Min", "-75.0"), dpin("Max", "75.0"), RET])
-g.link(nax["ReturnValue"], ycl["Value"])
+# (ycl Value left at 0: the rest pose is always the seat-facing row)
 yad = kml("Add_DoubleDouble", X4 + 1300, Y4 + 800, [dpin("A"), dpin("B", "75.0"), RET])
 g.link(ycl["ReturnValue"], yad["A"])
-yrd = kml("GridSnap_Float", X4 + 1500, Y4 + 800, [dpin("Location"), dpin("GridSize", "1.0"), RET])
+yrd = kml("GridSnap_Float", X4 + 1500, Y4 + 800, [dpin("Location"), dpin("GridSize", "0.25"), RET])
 g.link(yad["ReturnValue"], yrd["Location"])
-yrow = kml("Multiply_DoubleDouble", X4 + 1700, Y4 + 800, [dpin("A"), dpin("B", "0.766666667"), RET])
+yrow = kml("Multiply_DoubleDouble", X4 + 1700, Y4 + 800, [dpin("A"), dpin("B", "3.066666667"), RET])
 g.link(yrd["ReturnValue"], yrow["A"])
 pbrk = cbrk  # control rotation pitch
 pna = kml("NormalizeAxis", X4 + 850, Y4 + 1000, [("Angle", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
@@ -985,6 +1044,19 @@ pz4.pins["Montage"].const = True
 g.link(self_get("PoseMontage", "object", X4 + 1000, Y4 + 150, sub=MONTCLS), pz4["Montage"])
 g.link(c4c["then"], pz4["execute"])
 g.link(pz4["then"], setpos["execute"])
+br4r = branch(X4 + 1700, Y4 - 150, "resting? (hold the body)", b_not(X4 + 1600, Y4 + 100, self_get("PoseAdditive", "bool", X4 + 1450, Y4 + 100)))
+g.link(setpos["then"], br4r["execute"])
+mesh4 = other_get(CHAR, "Mesh", "object", X4 + 1900, Y4 + 150, as_pc, sub=SKM)
+hold = set_rot("K2_SetWorldRotation", X4 + 2000, Y4 - 350, mesh4,
+               make_rot(X4 + 1850, Y4 - 500, yaw_pin=self_get("SeatYaw", "real", X4 + 1700, Y4 - 500, subcat="double")), "body stays facing the seat")
+g.link(br4r["then"], hold["execute"])
+cam4 = cam_of(X4 + 2100, Y4 + 150, as_pc)
+unh = set_abs_rot(X4 + 2300, Y4 - 350, cam4, "true", "camera unhooked from the body")
+g.link(hold["then"], unh["execute"])
+view = set_rot("K2_SetWorldRotation", X4 + 2600, Y4 - 350, cam4,
+               make_rot(X4 + 2450, Y4 - 500, pitch_pin=pna["ReturnValue"], yaw_pin=cbrk["Yaw"]), "camera = the view")
+g.link(unh["then"], view["execute"])
+rel4 = body_release(X4 + 2000, Y4 + 350, as_pc, {"then": br4r["else"]}, "free arms")
 
 # =====================================================================
 # Stand up: move / jump / interact
@@ -1032,7 +1104,9 @@ mvs = member_call(CMC, "SetMovementMode", XS + 9800, YS, other_get(CHAR, "Charac
 g.link(brs["then"], st1["execute"])
 sa_s = stop_additive(XS + 1900, YS + 250, "seated pose off", yaw_on, other_get(CHAR, "Mesh", "object", XS + 1600, YS + 500, sc["AsPC"], sub=SKM) if False else anim_s)
 show_s = member_call(PC, "EnableInteractions", XS + 1350, YS + 250, sc["AsPC"], "interaction prompts back")
-chain(st1, st2, show_s, yaw_on)
+rel_s = body_release(XS + 1100, YS - 700, sc["AsPC"], st2, "stand")
+chain(st1, st2)
+chain(rel_s, show_s, yaw_on)
 chain(sa_s, ps, dl)
 g.link(dl["then"], mvs["execute"])
 lastr = restore_limits(XS + 10100, YS, "stand", mvs)
@@ -1121,7 +1195,14 @@ scr = member_call(cls("/Script/Engine.Controller"), "SetControlRotation", XG + 4
 scr.pins["NewRotation"].ref = True
 scr.pins["NewRotation"].const = True
 g.link(mkr["ReturnValue"], scr["NewRotation"])
-chain(dlg, scr, back)
+sar = member_call(ACTOR, "K2_SetActorRotation", XG + 4400, YG, gc["AsPC"], "turn to the seat now", [
+    ("NewRotation", "struct", dict(sub=ROT)), ("bTeleportPhysics", "bool", dict(extra='DefaultValue="true",')),
+    ("ReturnValue", "bool", dict(out=True))])
+g.link(make_rot(XG + 4300, YG + 600, yaw_pin=self_get("SeatYaw", "real", XG + 4150, YG + 700, subcat="double")), sar["NewRotation"])
+g.link(dlg["then"], scr["execute"])
+g.link(scr["then"], sar["execute"])
+rel_g = body_release(XG + 4700, YG, gc["AsPC"], sar, "guitar")
+g.link(rel_g["then"], back["execute"])
 
 gpc = lib_pure(GS, "GameplayStatics", "GetPlayerController", XG + 7800, YG + 450,
                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)),

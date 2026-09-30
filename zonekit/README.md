@@ -468,3 +468,12 @@ our pose montage changes only at item start / end (one change each, plus one ~60
 periodically while idle; standing, the actor's tick does only cheap branches. Suspects outside the release: the
 dev probe itself (three `FindFirstOf` object-array scans every 0.5 s) and the dev box's UE4SS Lua mods
 (InventoryTabs background loop, UltraPlus, DarkerNights, WalkWithWheels).
+
+## 2026-09-30 — builds 35-36: body pinned, camera unhooked
+
+Build 35 (0.25 deg rest rows) was never installed. Build 36: the rest pose no longer counter-rotates by table rows;
+the mesh is held at the seat yaw with `K2_SetWorldRotation` every tick and the camera component is set to absolute
+rotation and pointed at (look pitch from `ClampedControlPitch`, yaw = the actor's, which is ControlRotation's yaw).
+Actions (free arms), stand-up and the guitar hand-back put the mesh and camera back (camera relative rotation saved
+at the takeover). Noah: body jitter gone, guitar seamless, best RC so far. New: a second shadow turning with the view
+(`PC.ShadowMeshComponent` is its own component under the actor), camera control lost for a moment at item start / end.

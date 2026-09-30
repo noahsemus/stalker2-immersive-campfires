@@ -257,41 +257,58 @@ public:
         Output::send<LogLevel::Verbose>(STR("[CampProbe] burst {}\n"), StringType(b));
     }
 
+    // look-input gaps: ControlRotation stops changing for > 60 ms in the middle of a mouse move (build 34: "drops"
+    // after the guitar). Cheap: property reads on cached objects, no object-array scans.
+    UObject* m_cPawn = nullptr; UObject* m_cAct = nullptr; uint64_t m_cRefresh = 0;
+    FR m_gLast{}; uint64_t m_gChange = 0, m_gMoveStart = 0; bool m_gMoving = false; int m_gIgnLook = -2;
+    void Gaps(uint64_t now) {
+        if (!m_cPawn || m_cPawn->IsUnreachable()) return;
+        UObject* ctl = ObjProp(m_cPawn, STR("Controller")); if (!ctl) return;
+        FR cr{}; if (FProperty* p = ctl->GetPropertyByNameInChain(STR("ControlRotation"))) { FR* v = p->ContainerPtrToValuePtr<FR>(ctl); if (v) cr = *v; }
+        bool changed = fabs(cr.Y - m_gLast.Y) > 1e-4 || fabs(cr.P - m_gLast.P) > 1e-4;
+        if (changed) {
+            if (m_gMoving && now - m_gChange > 60 && now - m_gChange < 400)
+                Output::send<LogLevel::Verbose>(STR("[CampProbe] gap {}ms (moving {}ms) seated={}\n"), now - m_gChange, m_gChange - m_gMoveStart, m_bSeated);
+            if (!m_gMoving) m_gMoveStart = now;
+            m_gMoving = true; m_gChange = now; m_gLast = cr;
+        } else if (m_gMoving && now - m_gChange >= 400) m_gMoving = false;
+        int ign = CallBool(ctl, STR("IsLookInputIgnored"));
+        if (ign != m_gIgnLook) { Output::send<LogLevel::Verbose>(STR("[CampProbe] lookIgnored={} t={}\n"), ign, now % 100000); m_gIgnLook = ign; }
+    }
+
     auto on_update() -> void override {
         uint64_t now = GetTickCount64();
+        Gaps(now);
         Burst(now);
-        if (now - m_lastLive < 500) return;   // twice a second (FindFirstOf scans the object array)
+        if (now - m_lastLive < 500) return;
         m_lastLive = now;
-        UObject* pawn = UObjectGlobals::FindFirstOf(STR("PC"));
-        if (pawn && pawn->IsUnreachable()) pawn = nullptr;
+        // cached lookups: scan the object array only when a cached object is gone, or every 15 s
+        if (!m_cPawn || m_cPawn->IsUnreachable() || now - m_cRefresh > 15000) {
+            m_cRefresh = now;
+            m_cPawn = UObjectGlobals::FindFirstOf(STR("PC")); if (m_cPawn && m_cPawn->IsUnreachable()) m_cPawn = nullptr;
+            m_cAct = UObjectGlobals::FindFirstOf(STR("BP_ImmCampActor_C"));
+        }
+        UObject* pawn = m_cPawn;
         int seated = pawn ? SeatedFlag(pawn) : -1;
         StringType state = StringType(STR("pawn=")) + (pawn ? STR("1") : STR("0")) + STR(" seated=") + std::to_wstring(seated);
         if (state != m_lastState || now - m_lastHb > 30000) {
             m_lastState = state; m_lastHb = now;
             Output::send<LogLevel::Verbose>(STR("[CampProbe] {}\n"), state);
         }
-        // Post-process layer class, logged on change (install at a seat / restore elsewhere).
-        if (pawn) {
-            UObject* mesh = nullptr;
-            if (FProperty* p = pawn->GetPropertyByNameInChain(STR("Mesh"))) { UObject** v = p->ContainerPtrToValuePtr<UObject*>(pawn); if (v) mesh = *v; }
-            StringType pp = STR("null");
-            if (mesh) if (FProperty* p = mesh->GetPropertyByNameInChain(STR("PostProcessAnimInstance"))) { UObject** v = p->ContainerPtrToValuePtr<UObject*>(mesh); if (v && *v) pp = (*v)->GetClassPrivate()->GetName(); }
-            if (pp != m_lastPP) { m_lastPP = pp; Output::send<LogLevel::Verbose>(STR("[CampProbe] layer now {} (seated={})\n"), pp, seated); }
+        if (seated != 1 && m_cAct && !m_cAct->IsUnreachable()) {
+            UObject* act = m_cAct;
+            if (FProperty* p = act->GetPropertyByNameInChain(STR("SeatedMode")))
+                if (FBoolProperty* bp = CastField<FBoolProperty>(p)) { uint8_t* raw = p->ContainerPtrToValuePtr<uint8_t>(act); if (raw && bp->GetPropertyValue(raw)) seated = 1; }
         }
-        // Our own seated mode (the takeover clears the vanilla flag): read SeatedMode off the actor.
-        if (seated != 1) {
-            if (UObject* act = UObjectGlobals::FindFirstOf(STR("BP_ImmCampActor_C"))) {
-                if (FProperty* p = act->GetPropertyByNameInChain(STR("SeatedMode")))
-                    if (FBoolProperty* bp = CastField<FBoolProperty>(p)) { uint8_t* raw = p->ContainerPtrToValuePtr<uint8_t>(act); if (raw && bp->GetPropertyValue(raw)) seated = 1; }
-            }
-        }
-        m_bPawn = pawn; m_bSeated = seated; m_bAct = UObjectGlobals::FindFirstOf(STR("BP_ImmCampActor_C"));
+        m_bPawn = pawn; m_bSeated = seated; m_bAct = m_cAct;
         if (pawn) Body(pawn, seated, now);
         if (seated != 1) { if (m_sitStart != 0) ScanContexts(STR("stand")); m_sitStart = 0; m_scans = 0; return; }
         if (m_sitStart == 0) m_sitStart = now;
         if (m_scans == 0 && now - m_sitStart >= 500) { m_scans = 1; ScanContexts(STR("sit+0.5s")); }
         else if (m_scans == 1 && now - m_sitStart >= 3000) { m_scans = 2; ScanContexts(STR("sit+3s")); }
-        UObject* pi = UObjectGlobals::FindFirstOf(STR("EnhancedPlayerInput"));
+        static UObject* s_pi = nullptr; static uint64_t s_piT = 0;
+        if (!s_pi || s_pi->IsUnreachable() || now - s_piT > 15000) { s_piT = now; s_pi = UObjectGlobals::FindFirstOf(STR("EnhancedPlayerInput")); }
+        UObject* pi = s_pi;
         StringType live; int total = -1;
         bool ok = pi && ReadMappings(pi, STR("EnhancedActionMappings"), true, &live, &total);
         StringType line = StringType(STR("ok=")) + (ok ? STR("1") : STR("0")) + STR(" total=") + std::to_wstring(total) + STR(" [") + live + STR("]");

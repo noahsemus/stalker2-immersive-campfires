@@ -30,6 +30,11 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   mouse-look drop about once a second, also after leaving the campfire (Noah saw it before without the mod); the
   build 33 log shows no pose restarts between actions, so it is not the seated-mode logic (see zonekit/README.md).
 
+- 2026-09-30 build 36 (Noah: best release candidate so far): at rest the body is pinned to the seat (mesh world
+  rotation) and the camera unhooked (absolute rotation = actor yaw + look pitch); during actions both go back. Body
+  jitter gone, guitar seamless. Open: camera control lost for a moment when an item starts / ends, the separate
+  shadow mesh still turns with the view (second shadow).
+
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
   Exclusive; W/A/S/D/Space/F/Esc = `IA_PlayerCAExit`). While any interaction is in progress native PDA / backpack /

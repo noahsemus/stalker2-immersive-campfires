@@ -7,7 +7,7 @@ with the view.
 AS_ImmCamp_SitRest (plain pose, build 22: a yaw x pitch table): the bonfire sit idle frame 0, whole
 body turned by -yaw about the root (world-fixed while the actor turns with the view). A plain pose
 also overrides jnt_camera, and the view pitch lives only in that bone (build 21: no looking up or
-down), so the table has one row per 1 deg of yaw (151 rows) and 23 keys per row for pitch -60..50
+down), so the table has one row per 0.25 deg of yaw (601 rows; 1 deg steps showed as body jitter, build 34) and 23 keys per row for pitch -60..50
 in 5 deg steps (interpolated): key = row * 23 + (pitch + 60) / 5, jnt_camera rotation = the pitch.
 
 AS_ImmCamp_SitAdditive (additive, local space, base fp_bh_idle_stand frame 0): used while an
@@ -32,7 +32,8 @@ DIR = "/ImmersiveCampfires/Runtime"
 YAW_HALF, STEP = 75, 5
 YAWS = list(range(-YAW_HALF, YAW_HALF + 1, STEP))          # 31 keys
 N = len(YAWS)
-REST_YAWS = list(range(-YAW_HALF, YAW_HALF + 1))           # 151 rows
+REST_STEP = 0.25                                           # build 35: 1 deg rows stepped the body visibly
+REST_YAWS = [-YAW_HALF + REST_STEP * i for i in range(int(2 * YAW_HALF / REST_STEP) + 1)]   # 601 rows
 PITCHES = list(range(-60, 51, 5))                          # 23 keys per row
 REST_KEYS = [(y, p) for y in REST_YAWS for p in PITCHES]
 LEGS = {"jnt_b_hips_bag", "jnt_f_hips_bag", "jnt_l_hips_bag", "jnt_l_hips_bag2",
