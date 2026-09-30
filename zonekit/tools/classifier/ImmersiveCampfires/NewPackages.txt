@@ -1,7 +1,5 @@
 /ImmersiveCampfires/ImmersiveCampfires
 /ImmersiveCampfires/Runtime/BP_ImmCampSubsystem
 /ImmersiveCampfires/Runtime/BP_ImmCampActor
-/ImmersiveCampfires/Runtime/ABP_ImmCampSeatedLegs
-/ImmersiveCampfires/Runtime/ABP_ImmCampPassThrough
 /ImmersiveCampfires/Runtime/AS_ImmCamp_SitAdditive
 /ImmersiveCampfires/Runtime/AS_ImmCamp_SitRest

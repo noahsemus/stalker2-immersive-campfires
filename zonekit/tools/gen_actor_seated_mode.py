@@ -486,15 +486,18 @@ seated_flag = other_get(PC, "bInContextualAction", "bool", 700, 300, as_pc,
 mesh = other_get(CHAR, "Mesh", "object", 700, 420, as_pc, sub=SKM)
 anim = member_pure(SKM, "GetAnimInstance", 900, 420, mesh, [("ReturnValue", "object", dict(sub=ANIMI, out=True))])["ReturnValue"]
 move = other_get(CHAR, "CharacterMovement", "object", 700, 540, as_pc, sub=CMC)
-pp_inst = member_pure(SKM, "GetPostProcessInstance", 900, 660, mesh, [("ReturnValue", "object", dict(sub=ANIMI, out=True))])["ReturnValue"]
-pp_cls = lib_pure(GS, "GameplayStatics", "GetObjectClass", 1100, 660,
-                  [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "class", dict(sub=OBJ, out=True))])
-g.link(pp_inst, pp_cls["Object"])
-inst_eq = lib_pure(KML, "KismetMathLibrary", "EqualEqual_ClassClass", 1300, 660,
-                   [("A", "class", dict(sub=OBJ)), ("B", "class", dict(sub=OBJ, extra=f'DefaultObject="{LEGS_PP}",')),
-                    ("ReturnValue", "bool", dict(out=True))])
-g.link(pp_cls["ReturnValue"], inst_eq["A"])
-installed = inst_eq["ReturnValue"]
+# build 34: the post-process layer probe nodes are emitted only with the old layer code (they referenced
+# ABP_ImmCampSeatedLegs, deleted for the release)
+if USE_LEGS_LAYER:
+    pp_inst = member_pure(SKM, "GetPostProcessInstance", 900, 660, mesh, [("ReturnValue", "object", dict(sub=ANIMI, out=True))])["ReturnValue"]
+    pp_cls = lib_pure(GS, "GameplayStatics", "GetObjectClass", 1100, 660,
+                      [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "class", dict(sub=OBJ, out=True))])
+    g.link(pp_inst, pp_cls["Object"])
+    inst_eq = lib_pure(KML, "KismetMathLibrary", "EqualEqual_ClassClass", 1300, 660,
+                       [("A", "class", dict(sub=OBJ)), ("B", "class", dict(sub=OBJ, extra=f'DefaultObject="{LEGS_PP}",')),
+                        ("ReturnValue", "bool", dict(out=True))])
+    g.link(pp_cls["ReturnValue"], inst_eq["A"])
+    installed = inst_eq["ReturnValue"]
 
 # ---- 0: save look limits once ----
 X0, Y0 = 1200, -1400
