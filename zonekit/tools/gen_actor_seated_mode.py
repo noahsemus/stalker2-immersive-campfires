@@ -373,7 +373,7 @@ def play_rest_eased(x, y, comment, prev, seconds):
     for pn in ("BlendIn", "BlendOut"):
         n.pins[pn].ref = True
         n.pins[pn].const = True
-    g.link(blend_args(x - 250, y + 350, seconds), n["BlendIn"])
+    g.link(blend_args(x - 250, y + 350, seconds, "ExpOut"), n["BlendIn"])
     g.link(blend_args(x - 250, y + 550, 0.25, "Linear"), n["BlendOut"])
     g.link(prev["then"], n["execute"])
     sv = self_set("PoseMontage", "object", x + 350, y, "", sub=MONTCLS)
@@ -964,7 +964,41 @@ g.link(hand3, h0["A"])
 busy = b_or(X3 + 2000, Y3 + 400, b_or(X3 + 1850, Y3 + 340, q_pda, q_bag),
             b_and(X3 + 1900, Y3 + 700, h0["ReturnValue"],
             b_or(X3 + 1850, Y3 + 500, q_act, b_or(X3 + 1750, Y3 + 580, q_def, q_up))))
-brb = branch(X3 + 1800, Y3, "arms busy?", busy)
+itm = self_get("ItemMontage", "object", X3 + 900, Y3 + 1300, sub=MONTCLS)
+iplay = member_pure(ANIMI, "Montage_IsPlaying", X3 + 1100, Y3 + 1300, anim, [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "bool", dict(out=True))])
+iplay.pins["Montage"].const = True
+g.link(itm, iplay["Montage"])
+isec = member_pure(ANIMI, "Montage_GetCurrentSection", X3 + 1100, Y3 + 1400, anim,
+                   [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "name", dict(out=True))])
+isec.pins["Montage"].const = True
+g.link(itm, isec["Montage"])
+ipos = member_pure(ANIMI, "Montage_GetPosition", X3 + 1100, Y3 + 1500, anim,
+                   [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "real", dict(subcat="float", out=True))])
+ipos.pins["Montage"].const = True
+g.link(itm, ipos["Montage"])
+ilen = member_pure(ANIMSEQB, "GetPlayLength", X3 + 1100, Y3 + 1600, itm, [("ReturnValue", "real", dict(subcat="float", out=True))])
+irem = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X3 + 1300, Y3 + 1550,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                 ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(ilen["ReturnValue"], irem["A"])
+g.link(ipos["ReturnValue"], irem["B"])
+ilast = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X3 + 1500, Y3 + 1550,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.5",')),
+                  ("ReturnValue", "bool", dict(out=True))])
+g.link(irem["ReturnValue"], ilast["A"])
+# build 45: Montage_IsPlaying(None) means "any montage playing" and a None length is 0: with no item captured yet
+# the test read "ending" and blocked every item. Require a captured montage that is not our own pose.
+ival = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 900, Y3 + 1700,
+                [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(itm, ival["Object"])
+inot = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 900, Y3 + 1800,
+                [("A", "object", dict(sub=OBJ)), ("B", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(itm, inot["A"])
+g.link(self_get("PoseMontage", "object", X3 + 700, Y3 + 1850, sub=MONTCLS), inot["B"])
+iok = b_and(X3 + 1100, Y3 + 1750, ival["ReturnValue"], inot["ReturnValue"])
+ending = b_and(X3 + 1700, Y3 + 1400, b_and(X3 + 1500, Y3 + 1700, iok, iplay["ReturnValue"]), b_or(X3 + 1600, Y3 + 1450, name_eq(X3 + 1400, Y3 + 1400, isec["ReturnValue"], "Out"), ilast["ReturnValue"]))
+busy = b_and(X3 + 1850, Y3 + 1200, busy, b_not(X3 + 1800, Y3 + 1300, ending))
+brb = branch(X3 + 1800, Y3, "arms busy? (item not in its last 0.5 s)", busy)
 hsq = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X3 + 1500, Y3 - 400, "weapon re-equipped?")
 hsq.pin("execute", "exec")
 hsq.pin("then_0", "exec", out=True)
@@ -1001,7 +1035,11 @@ g.link(now3["ReturnValue"], lat["LastActionTime"])
 g.link(brb["then"], lat["execute"])
 brf = branch(X3 + 2400, Y3 - 200, "resting pose on?", b_not(X3 + 2300, Y3 - 50, self_get("PoseAdditive", "bool", X3 + 2200, Y3 - 50)))
 g.link(lat["then"], brf["execute"])
-paf = play_additive(X3 + 2700, Y3 - 200, "free arms (additive legs)", brf, None, 0.1)
+cur_m = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 2450, Y3 - 450, anim, [("ReturnValue", "object", dict(sub=MONTCLS, out=True))])["ReturnValue"]
+sim = self_set("ItemMontage", "object", X3 + 2550, Y3 - 350, "the item animation", sub=MONTCLS)
+g.link(cur_m, sim["ItemMontage"])
+g.link(brf["then"], sim["execute"])
+paf = play_additive(X3 + 2700, Y3 - 200, "free arms (additive legs)", sim, None, 0.1)
 pa1 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 - 200, "pose: free arms", default="true")
 g.link(paf["then"], pa1["execute"])
 par1 = self_set("PoseAR", "bool", X3 + 3250, Y3 - 200, "free arms on the item stance", default="true")
@@ -1013,7 +1051,7 @@ since3 = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X3 + 2200, 
 g.link(now3["ReturnValue"], since3["A"])
 g.link(self_get("LastActionTime", "real", X3 + 2000, Y3 + 750, subcat="double"), since3["B"])
 calm = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X3 + 2400, Y3 + 650,
-                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.4",')),
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.1",')),
                  ("ReturnValue", "bool", dict(out=True))])
 g.link(since3["ReturnValue"], calm["A"])
 sitplay = member_pure(ANIMI, "Montage_IsPlaying", X3 + 2400, Y3 + 800, anim,
