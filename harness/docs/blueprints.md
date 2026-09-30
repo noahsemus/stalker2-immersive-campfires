@@ -15,7 +15,7 @@ of 20-200 nodes (event graphs and anim graphs).
 3. Put it on the clipboard (`Set-Clipboard -Value (Get-Content <file> -Raw)`), the tester clicks into the graph and
    presses Ctrl+V, then wires only the 1-3 pins that connect to nodes outside the block. **Links to nodes that are
    not in the paste are dropped**, so keep external wiring minimal and name those pins exactly.
-4. He compiles and saves; read it back with `export_t3d.py` to verify (the export lists deleted-but-not-GC'd nodes
+4. They compile and save; read it back with `export_t3d.py` to verify (the export lists deleted-but-not-GC'd nodes
    too: trust each graph's `Nodes(n)` list).
 
 Put `NodeComment` labels and comment boxes in the generated text (see `collaboration.md`). Keep mod-specific
@@ -50,6 +50,10 @@ Blueprint "Float" variables are doubles. `BlueprintEditorLibrary.add_member_vari
 - **Overridden assets exist twice at runtime** (`/Game/...` and `/<Mod>/...`), and the editor redirects every `/Game`
   pick of an overridden asset to the mod path. Only the game-path object gets the game's runtime treatment (e.g. the
   player's rebinds), so load it by path string when it matters (`input.md`).
+- **A pasted `0.0` on a function pin whose C++ default is non-zero comes back as the default** (e.g.
+  `Montage_SetPlayRate.NewPlayRate` = 1.0); feed such values from a node output. Blueprint T3D exports also carry
+  deleted nodes, so verify pin values in game (probe), not in an export.
+- A pasted pure `K2Node_DynamicCast` (`bIsPureCast=True`) comes in as an exec cast; wire its exec pins.
 - `Print String` is stripped in Shipping: trace with visible side effects or a dev-box probe (`diagnostics.md`).
 - Anim notify / linked-layer pins: a Linked Anim Graph node only exposes an `In Pose` pin if the target's AnimGraph
   function has one; our pass-through ABP never offered it (dead end, `animation.md`).
