@@ -3,3 +3,4 @@
 /ImmersiveCampfires/Runtime/BP_ImmCampActor
 /ImmersiveCampfires/Runtime/AS_ImmCamp_SitAdditive
 /ImmersiveCampfires/Runtime/AS_ImmCamp_SitRest
+/ImmersiveCampfires/Runtime/AS_ImmCamp_SitAdditiveBH

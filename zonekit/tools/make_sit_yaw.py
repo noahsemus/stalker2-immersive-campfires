@@ -28,6 +28,14 @@ SRC = "/Game/_STALKER2/Animations/Player/AnimSequences/contextual_action/sit_gro
 # 19 deg away from fp_bh_idle_stand (the same pose as fp_ar_idle_stand), so a bh-based table swung the
 # seated legs by that much while an item played ("legs shift during item use", builds 21-27).
 BASE = "/Game/_STALKER2/Animations/Player/AnimSequences/ar/common/stand/fp_ar_idle_stand"
+# Build 40: a second free-arms table on the empty-handed stance. Between an item's end and the resting pose the
+# game's base is fp_bh_idle_stand again (hips 19 deg / 7.4 cm away), so the item-stance table threw the legs off
+# ("snaps, then eases back"); the Blueprint picks the table that matches the stance underneath.
+BASE_BH = "/Game/_STALKER2/Animations/Player/AnimSequences/bh/stand/fp_bh_idle_stand"
+try:
+    DO_REST = ARGS.get("rest", "1") == "1"
+except NameError:
+    DO_REST = True
 DIR = "/ImmersiveCampfires/Runtime"
 YAW_HALF, STEP = 75, 5
 YAWS = list(range(-YAW_HALF, YAW_HALF + 1, STEP))          # 31 keys
@@ -107,7 +115,7 @@ def pitch_q(p):          # FRotator(p, 0, 0).Quaternion()
     return (0.0, -math.sin(h), 0.0, math.cos(h))
 
 
-def prepare(name, additive, n=N):
+def prepare(name, additive, n=N, ref=None):
     path = DIR + "/" + name
     if not EAL.does_asset_exist(path):
         unreal.AssetToolsHelpers.get_asset_tools().duplicate_asset(name, DIR, src)
@@ -122,7 +130,7 @@ def prepare(name, additive, n=N):
     if additive:
         seq.set_editor_property("additive_anim_type", unreal.AdditiveAnimationType.AAT_LOCAL_SPACE_BASE)
         seq.set_editor_property("ref_pose_type", unreal.AdditiveBasePoseType.ABPT_ANIM_FRAME)
-        seq.set_editor_property("ref_pose_seq", base)
+        seq.set_editor_property("ref_pose_seq", ref or base)
         seq.set_editor_property("ref_frame_index", 0)
     else:
         seq.set_editor_property("additive_anim_type", unreal.AdditiveAnimationType.AAT_NONE)
@@ -139,60 +147,67 @@ def write(seq, ctrl, keys):
 
 
 # ---- resting: whole sit pose turned about the root ----
-NR = len(REST_KEYS)
-seq, ctrl = prepare("AS_ImmCamp_SitRest", False, NR)
-keys = {}
-for b in tracks:
-    t = sit[b]
-    if parent[b] == "jnt_root":
-        pos, rot = [], []
-        for y, p in REST_KEYS:
-            r = rz(-y)
-            pos.append(qrot(r, v(t)))
-            rot.append(pitch_q(p) if b == "jnt_camera" else qmul(r, q(t)))
-        keys[b] = (pos, rot, [t.scale3d] * NR)
-    else:
-        keys[b] = ([v(t)] * NR, [q(t)] * NR, [t.scale3d] * NR)
-write(seq, ctrl, keys)
+if DO_REST:
+    NR = len(REST_KEYS)
+    seq, ctrl = prepare("AS_ImmCamp_SitRest", False, NR)
+    keys = {}
+    for b in tracks:
+        t = sit[b]
+        if parent[b] == "jnt_root":
+            pos, rot = [], []
+            for y, p in REST_KEYS:
+                r = rz(-y)
+                pos.append(qrot(r, v(t)))
+                rot.append(pitch_q(p) if b == "jnt_camera" else qmul(r, q(t)))
+            keys[b] = (pos, rot, [t.scale3d] * NR)
+        else:
+            keys[b] = ([v(t)] * NR, [q(t)] * NR, [t.scale3d] * NR)
+    write(seq, ctrl, keys)
 
-# ---- free arms: standing upper body, hips moved (not turned), sit legs turned about the root ----
-seq, ctrl = prepare("AS_ImmCamp_SitAdditive", True)
-Qh_s, Ph_s = q(sit["jnt_hips"]), v(sit["jnt_hips"])
-Qh_b, Ph_b = q(bas["jnt_hips"]), v(bas["jnt_hips"])
-keys = {}
-for b in tracks:
-    tb = bas[b]
-    keys[b] = ([v(tb)] * N, [q(tb)] * N, [tb.scale3d] * N)       # zero delta by default
-hp, cp = [], []
-for y in YAWS:
-    r = rz(-y)
-    ph = qrot(r, Ph_s)
-    hp.append(ph)
-    cp.append(add(v(bas["jnt_camera"]), sub(ph, Ph_b)))
-keys["jnt_hips"] = (hp, [Qh_b] * N, [bas["jnt_hips"].scale3d] * N)
-keys["jnt_camera"] = (cp, [q(bas["jnt_camera"])] * N, [bas["jnt_camera"].scale3d] * N)
-for b in tracks:                           # item / weapon / IK-hand roots follow the hips offset
-    if parent[b] == "jnt_root" and b not in ("jnt_hips", "jnt_camera") and b not in LEGS:
+def build_additive(name, base_seq):
+    # ---- free arms: standing upper body, hips moved (not turned), sit legs turned about the root ----
+    seq, ctrl = prepare(name, True, N, base_seq)
+    Qh_s, Ph_s = q(sit["jnt_hips"]), v(sit["jnt_hips"])
+    bas = {b: AL.get_bone_pose_for_frame(base_seq, b, 0, False) for b in tracks}
+    Qh_b, Ph_b = q(bas["jnt_hips"]), v(bas["jnt_hips"])
+    keys = {}
+    for b in tracks:
         tb = bas[b]
-        keys[b] = ([add(v(tb), sub(hp[k], Ph_b)) for k in range(N)], [q(tb)] * N, [tb.scale3d] * N)
-for b in LEGS:
-    if b not in sit:
-        continue
-    t = sit[b]
-    if parent[b] == "jnt_hips":           # root-space sit transform, turned, re-expressed under the standing hips
-        pos, rot = [], []
-        for k, y in enumerate(YAWS):
-            r = rz(-y)
-            rs_rot = qmul(r, qmul(Qh_s, q(t)))
-            rs_pos = qrot(r, add(Ph_s, qrot(Qh_s, v(t))))
-            rot.append(qmul(qinv(Qh_b), rs_rot))
-            pos.append(qrot(qinv(Qh_b), sub(rs_pos, hp[k])))
-        keys[b] = (pos, rot, [t.scale3d] * N)
-    elif parent[b] == "jnt_root":
-        keys[b] = ([qrot(rz(-y), v(t)) for y in YAWS], [qmul(rz(-y), q(t)) for y in YAWS], [t.scale3d] * N)
-    else:
-        keys[b] = ([v(t)] * N, [q(t)] * N, [t.scale3d] * N)
-log.append("hips sit %s base %s; camera drop at yaw 0 %s" % (tuple(round(x, 1) for x in Ph_s), tuple(round(x, 1) for x in Ph_b),
-                                                            tuple(round(x, 1) for x in sub(Ph_s, Ph_b))))
-write(seq, ctrl, keys)
+        keys[b] = ([v(tb)] * N, [q(tb)] * N, [tb.scale3d] * N)       # zero delta by default
+    hp, cp = [], []
+    for y in YAWS:
+        r = rz(-y)
+        ph = qrot(r, Ph_s)
+        hp.append(ph)
+        cp.append(add(v(bas["jnt_camera"]), sub(ph, Ph_b)))
+    keys["jnt_hips"] = (hp, [Qh_b] * N, [bas["jnt_hips"].scale3d] * N)
+    keys["jnt_camera"] = (cp, [q(bas["jnt_camera"])] * N, [bas["jnt_camera"].scale3d] * N)
+    for b in tracks:                           # item / weapon / IK-hand roots follow the hips offset
+        if parent[b] == "jnt_root" and b not in ("jnt_hips", "jnt_camera") and b not in LEGS:
+            tb = bas[b]
+            keys[b] = ([add(v(tb), sub(hp[k], Ph_b)) for k in range(N)], [q(tb)] * N, [tb.scale3d] * N)
+    for b in LEGS:
+        if b not in sit:
+            continue
+        t = sit[b]
+        if parent[b] == "jnt_hips":           # root-space sit transform, turned, re-expressed under the standing hips
+            pos, rot = [], []
+            for k, y in enumerate(YAWS):
+                r = rz(-y)
+                rs_rot = qmul(r, qmul(Qh_s, q(t)))
+                rs_pos = qrot(r, add(Ph_s, qrot(Qh_s, v(t))))
+                rot.append(qmul(qinv(Qh_b), rs_rot))
+                pos.append(qrot(qinv(Qh_b), sub(rs_pos, hp[k])))
+            keys[b] = (pos, rot, [t.scale3d] * N)
+        elif parent[b] == "jnt_root":
+            keys[b] = ([qrot(rz(-y), v(t)) for y in YAWS], [qmul(rz(-y), q(t)) for y in YAWS], [t.scale3d] * N)
+        else:
+            keys[b] = ([v(t)] * N, [q(t)] * N, [t.scale3d] * N)
+    log.append("hips sit %s base %s; camera drop at yaw 0 %s" % (tuple(round(x, 1) for x in Ph_s), tuple(round(x, 1) for x in Ph_b),
+                                                                tuple(round(x, 1) for x in sub(Ph_s, Ph_b))))
+    write(seq, ctrl, keys)
+
+
+build_additive("AS_ImmCamp_SitAdditive", base)
+build_additive("AS_ImmCamp_SitAdditiveBH", unreal.load_asset(BASE_BH))
 unreal.log("SITYAW\n" + "\n".join(log))

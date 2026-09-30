@@ -207,10 +207,11 @@ public:
         int moveIgn = -1, mode = -1; UObject* ctl = ObjProp(pawn, STR("Controller")); UObject* cmc = ObjProp(pawn, STR("CharacterMovement"));
         if (ctl) moveIgn = CallBool(ctl, STR("IsMoveInputIgnored"));
         if (cmc) if (FProperty* mp = cmc->GetPropertyByNameInChain(STR("MovementMode"))) { uint8_t* v = mp->ContainerPtrToValuePtr<uint8_t>(cmc); if (v) mode = *v; }
+        FV aloc{}; if (UFunction* f = pawn->GetFunctionByNameInChain(FName(STR("K2_GetActorLocation")))) { struct { FV R; } q{}; if (GuardedPE(pawn, f, &q)) aloc = q.R; }
         int camAbs = -1; FR camRel{};
         if (cam) { if (FProperty* p = cam->GetPropertyByNameInChain(STR("bAbsoluteRotation"))) if (FBoolProperty* bp = CastField<FBoolProperty>(p)) { uint8_t* raw = p->ContainerPtrToValuePtr<uint8_t>(cam); if (raw) camAbs = bp->GetPropertyValue(raw) ? 1 : 0; }
                    if (FProperty* p = cam->GetPropertyByNameInChain(STR("RelativeRotation"))) { FR* v = p->ContainerPtrToValuePtr<FR>(cam); if (v) camRel = *v; } }
-        swprintf_s(b, 640, L"moveIgnored=%d moveMode=%d camAbs=%d camRel=(%.1f,%.1f,%.1f) lookIgnored=%d", moveIgn, mode, camAbs, camRel.P, camRel.Y, camRel.R, ctl ? CallBool(ctl, STR("IsLookInputIgnored")) : -1);
+        swprintf_s(b, 640, L"moveIgnored=%d moveMode=%d camAbs=%d camRel=(%.1f,%.1f,%.1f) lookIgnored=%d actor=(%.1f,%.1f,%.1f)", moveIgn, mode, camAbs, camRel.P, camRel.Y, camRel.R, ctl ? CallBool(ctl, STR("IsLookInputIgnored")) : -1, aloc.X, aloc.Y, aloc.Z);
         Output::send<LogLevel::Verbose>(STR("[CampProbe] move {}\n"), StringType(b));
         swprintf_s(b, 640, L"hand=%d hasMain=%d leftBusy=%d equippedNone=%d pda=%d bag=%d",
             CallByte(pawn, STR("GetMainHandEquipType")), CallBool(pawn, STR("HasItemInMainHand")), CallBool(pawn, STR("IsLeftHandBusy")),
@@ -234,8 +235,49 @@ public:
             m_lastMont = mont; m_lastPose = pose;
         }
     }
+    // transition trace (build 40: "legs, arms and body snap when an item ends"): 2.5 s at ~30 Hz from every change of
+    // MainActionSlot activity or of PoseAdditive; bone positions relative to the actor, our pose state
+    uint64_t m_trEnd = 0, m_trLast = 0; int m_lastActSlot = -1, m_lastPA = -1; StringType m_lastTgt;
+    static bool BoolVar(UObject* o, const wchar_t* n) {
+        if (!o) return false; FProperty* p = o->GetPropertyByNameInChain(n); FBoolProperty* bp = p ? CastField<FBoolProperty>(p) : nullptr;
+        uint8_t* raw = p ? p->ContainerPtrToValuePtr<uint8_t>(o) : nullptr; return bp && raw && bp->GetPropertyValue(raw);
+    }
+    static double DblVar(UObject* o, const wchar_t* n) {
+        if (!o) return 0; FProperty* p = o->GetPropertyByNameInChain(n); double* v = p ? p->ContainerPtrToValuePtr<double>(o) : nullptr; return v ? *v : 0;
+    }
+    void Trace(uint64_t now) {
+        if (!m_bPawn || m_bSeated != 1 || m_bPawn->IsUnreachable() || !m_bAct || m_bAct->IsUnreachable()) return;
+        UObject* mesh = ObjProp(m_bPawn, STR("Mesh")); if (!mesh) return;
+        UObject* anim = nullptr;
+        if (UFunction* f = mesh->GetFunctionByNameInChain(FName(STR("GetAnimInstance")))) { struct { UObject* R = nullptr; } q; if (GuardedPE(mesh, f, &q)) anim = q.R; }
+        int act = -1;
+        if (anim) if (UFunction* f = anim->GetFunctionByNameInChain(FName(STR("IsSlotActive")))) { struct { FName N; bool R = false; } q{}; q.N = FName(STR("MainActionSlot")); if (GuardedPE(anim, f, &q)) act = q.R ? 1 : 0; }
+        int pa = BoolVar(m_bAct, STR("PoseAdditive")) ? 1 : 0;
+        if (act != m_lastActSlot || pa != m_lastPA) { m_trEnd = now + 2500; Output::send<LogLevel::Verbose>(STR("[CampProbe] trace start act={} poseAdditive={}\n"), act, pa); }
+        m_lastActSlot = act; m_lastPA = pa;
+        // guitar spot data: the saved interaction target's location, logged when it changes
+        if (UObject* tgt = ObjProp(m_bAct, STR("TargetSaved"))) {
+            FV tl{}; CompLoc(tgt, &tl); UObject* own = nullptr;
+            if (UFunction* f = tgt->GetFunctionByNameInChain(FName(STR("GetOwner")))) { struct { UObject* R = nullptr; } q; if (GuardedPE(tgt, f, &q)) own = q.R; }
+            FV ol{}; if (own) if (UFunction* f = own->GetFunctionByNameInChain(FName(STR("K2_GetActorLocation")))) { struct { FV R; } q{}; if (GuardedPE(own, f, &q)) ol = q.R; }
+            wchar_t tb[256]; swprintf_s(tb, 256, L"target comp=(%.1f,%.1f,%.1f) owner=%s (%.1f,%.1f,%.1f)", tl.X, tl.Y, tl.Z, own ? own->GetName().c_str() : L"none", ol.X, ol.Y, ol.Z);
+            StringType ts(tb); if (ts != m_lastTgt) { m_lastTgt = ts; Output::send<LogLevel::Verbose>(STR("[CampProbe] {}\n"), ts); }
+        }
+        if (now > m_trEnd || now - m_trLast < 33) return;
+        m_trLast = now;
+        FV a{}; if (UFunction* f = m_bPawn->GetFunctionByNameInChain(FName(STR("K2_GetActorLocation")))) { struct { FV R; } q{}; if (GuardedPE(m_bPawn, f, &q)) a = q.R; }
+        FV lf{}, rh{}, lh{}, sp{}, hp{}; Sock(mesh, STR("jnt_l_foot"), &lf); Sock(mesh, STR("jnt_r_hand"), &rh); Sock(mesh, STR("jnt_l_hand"), &lh); Sock(mesh, STR("jnt_spine_03"), &sp); Sock(mesh, STR("jnt_hips"), &hp);
+        StringType mont = STR("none");
+        if (anim) if (UFunction* f = anim->GetFunctionByNameInChain(FName(STR("GetCurrentActiveMontage")))) { struct { UObject* R = nullptr; } q; if (GuardedPE(anim, f, &q) && q.R) mont = q.R->GetName(); }
+        wchar_t b[400];
+        swprintf_s(b, 400, L"t=%llu act=%d PA=%d AR=%d unh=%d body=%.1f seat=%.1f lfoot=(%.0f,%.0f,%.0f) rhand=(%.0f,%.0f,%.0f) lhand=(%.0f,%.0f,%.0f) spine3=(%.0f,%.0f,%.0f) hips=(%.0f,%.0f,%.0f) mont=%s",
+            now % 100000, act, pa, BoolVar(m_bAct, STR("PoseAR")) ? 1 : 0, BoolVar(m_bAct, STR("CamUnhooked")) ? 1 : 0, DblVar(m_bAct, STR("BodyYaw")), DblVar(m_bAct, STR("SeatYaw")),
+            lf.X - a.X, lf.Y - a.Y, lf.Z - a.Z, rh.X - a.X, rh.Y - a.Y, rh.Z - a.Z, lh.X - a.X, lh.Y - a.Y, lh.Z - a.Z, sp.X - a.X, sp.Y - a.Y, sp.Z - a.Z, hp.X - a.X, hp.Y - a.Y, hp.Z - a.Z, mont.c_str());
+        Output::send<LogLevel::Verbose>(STR("[CampProbe] tr {}\n"), StringType(b));
+    }
     void Burst(uint64_t now) {
         MontageEvents(now);
+        Trace(now);
         m_frame++;
         if (!m_bPawn || m_bSeated != 1) { m_burst = 0; return; }
         if (m_burst == 0) { if (now - m_lastBurst < 10000) return; m_lastBurst = now; m_burst = 40; }
