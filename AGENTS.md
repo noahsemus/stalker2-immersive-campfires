@@ -25,6 +25,11 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   to the seated mode, walking after standing works. Open: brief input drop every ~1 s after an item, pistol shown
   for a moment after an item (game re-equips it), a short body turn when the guitar comes out, sleep not started.
 
+- 2026-09-30 build 33 = release candidate (Noah): pistol hidden the moment the game re-equips it, the seat faced
+  before the guitar hand-back (no body swing), a lost resting pose snaps back instead of easing. Open: a brief
+  mouse-look drop about once a second, also after leaving the campfire (Noah saw it before without the mod); the
+  build 33 log shows no pose restarts between actions, so it is not the seated-mode logic (see zonekit/README.md).
+
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
   Exclusive; W/A/S/D/Space/F/Esc = `IA_PlayerCAExit`). While any interaction is in progress native PDA / backpack /

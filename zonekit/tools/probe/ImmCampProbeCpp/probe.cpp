@@ -217,7 +217,22 @@ public:
 
     // per-frame burst (40 frames every 10 s while seated): view pitch jitter at rest (builds 22-24)
     UObject* m_bPawn = nullptr; UObject* m_bAct = nullptr; int m_bSeated = 0; uint64_t m_lastBurst = 0; int m_burst = 0; uint64_t m_frame = 0;
+    StringType m_lastMont; UObject* m_lastPose = nullptr;
+    // every change of the active montage and of our PoseMontage while seated (input drop after items, build 32)
+    void MontageEvents(uint64_t now) {
+        if (!m_bPawn || m_bSeated != 1 || m_bPawn->IsUnreachable()) { m_lastMont.clear(); return; }
+        UObject* mesh = ObjProp(m_bPawn, STR("Mesh")); UObject* anim = nullptr;
+        if (mesh) if (UFunction* f = mesh->GetFunctionByNameInChain(FName(STR("GetAnimInstance")))) { struct { UObject* R = nullptr; } q; if (GuardedPE(mesh, f, &q)) anim = q.R; }
+        StringType mont = STR("none");
+        if (anim) if (UFunction* f = anim->GetFunctionByNameInChain(FName(STR("GetCurrentActiveMontage")))) { struct { UObject* R = nullptr; } q; if (GuardedPE(anim, f, &q) && q.R) mont = q.R->GetName(); }
+        UObject* pose = (m_bAct && !m_bAct->IsUnreachable()) ? ObjProp(m_bAct, STR("PoseMontage")) : nullptr;
+        if (mont != m_lastMont || pose != m_lastPose) {
+            Output::send<LogLevel::Verbose>(STR("[CampProbe] mont t={} active={} pose={}\n"), now % 100000, mont, pose ? pose->GetName() : StringType(STR("null")));
+            m_lastMont = mont; m_lastPose = pose;
+        }
+    }
     void Burst(uint64_t now) {
+        MontageEvents(now);
         m_frame++;
         if (!m_bPawn || m_bSeated != 1) { m_burst = 0; return; }
         if (m_burst == 0) { if (now - m_lastBurst < 10000) return; m_lastBurst = now; m_burst = 40; }

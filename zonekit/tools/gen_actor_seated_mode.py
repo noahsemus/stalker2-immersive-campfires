@@ -270,11 +270,11 @@ def restore_limits(x, y, label, prev):
     return sets[-1]
 
 
-def play_additive(x, y, comment, prev, asset=None):
+def play_additive(x, y, comment, prev, asset=None, blend_in=0.35):
     n = member_call(ANIMI, "PlaySlotAnimationAsDynamicMontage", x, y, anim, comment, [
         ("Asset", "object", dict(sub=ANIMSEQB, extra=f'DefaultObject="{asset or SIT_ADD}",')),
         ("SlotNodeName", "name", dict(extra='DefaultValue="FullBody",')),
-        ("BlendInTime", "real", dict(subcat="float", extra='DefaultValue="0.350000",')),
+        ("BlendInTime", "real", dict(subcat="float", extra=f'DefaultValue="{blend_in:.6f}",')),
         ("BlendOutTime", "real", dict(subcat="float", extra='DefaultValue="0.250000",')),
         ("InPlayRate", "real", dict(subcat="float", extra='DefaultValue="1.000000",')),
         ("LoopCount", "int", dict(extra='DefaultValue="1000000",')),
@@ -293,8 +293,8 @@ def play_additive(x, y, comment, prev, asset=None):
     return pz
 
 
-def play_rest(x, y, comment, prev):
-    return play_additive(x, y, comment, prev, SIT_REST)
+def play_rest(x, y, comment, prev, blend_in=0.35):
+    return play_additive(x, y, comment, prev, SIT_REST, blend_in)
 
 
 def stop_additive(x, y, comment, prev, anim_pin):
@@ -787,7 +787,28 @@ busy = b_or(X3 + 2000, Y3 + 400, b_or(X3 + 1850, Y3 + 340, q_pda, q_bag),
             b_and(X3 + 1900, Y3 + 700, h0["ReturnValue"],
             b_or(X3 + 1850, Y3 + 500, q_act, b_or(X3 + 1750, Y3 + 580, q_def, q_up))))
 brb = branch(X3 + 1800, Y3, "arms busy?", busy)
-g.link(lim[-1]["then"], brb["execute"])
+hsq = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X3 + 1500, Y3 - 400, "weapon re-equipped?")
+hsq.pin("execute", "exec")
+hsq.pin("then_0", "exec", out=True)
+hsq.pin("then_1", "exec", out=True)
+g.link(lim[-1]["then"], hsq["execute"])
+hne3 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ByteByte", X3 + 1500, Y3 - 150,
+                [("A", "byte", dict(extra='DefaultValue="0",')), ("B", "byte", dict(extra='DefaultValue="0",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(hand3, hne3["A"])
+g.link(self_get("SavedHand", "byte", X3 + 1300, Y3 - 100, sub=HANDENUM), hne3["B"])
+nz3 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ByteByte", X3 + 1500, Y3 - 50,
+               [("A", "byte", dict(extra='DefaultValue="0",')), ("B", "byte", dict(extra='DefaultValue="0",')),
+                ("ReturnValue", "bool", dict(out=True))])
+g.link(hand3, nz3["A"])
+brwe = branch(X3 + 1700, Y3 - 400, "weapon just came out?", b_and(X3 + 1650, Y3 - 100, hne3["ReturnValue"], nz3["ReturnValue"]))
+g.link(hsq["then_0"], brwe["execute"])
+rwe = member_call(OBJC, "RemoveWeaponFromHands", X3 + 2000, Y3 - 400, as_pc, "hide it at once")
+g.link(brwe["then"], rwe["execute"])
+shd = self_set("SavedHand", "byte", X3 + 1700, Y3 - 250, "remember the hand", sub=HANDENUM)
+g.link(hand3, shd["SavedHand"])
+g.link(hsq["then_1"], shd["execute"])
+g.link(shd["then"], brb["execute"])
 now3 = lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X3 + 2000, Y3 + 650,
                 [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])
 # busy: remember when, switch to the free-arms (additive) pose once
@@ -846,7 +867,11 @@ lpa = self_set("LastPutAway", "real", X3 + 3000, Y3 + 950, "tried just now", sub
 g.link(now3["ReturnValue"], lpa["LastPutAway"])
 g.link(away["then"], lpa["execute"])
 g.link(isq["then_1"], brr["execute"])
-pr = play_rest(X3 + 2700, Y3 + 200, "resting seated pose", brr)
+brh = branch(X3 + 2550, Y3 + 200, "coming from free arms?", self_get("PoseAdditive", "bool", X3 + 2450, Y3 + 350))
+g.link(brr["then"], brh["execute"])
+pr = play_rest(X3 + 2700, Y3 + 200, "resting seated pose", {"then": brh["then"]})
+prh = play_rest(X3 + 2700, Y3 + 450, "resting pose lost: back at once", {"then": brh["else"]}, 0.01)
+g.link(prh["then"], self_set("PoseAdditive", "bool", X3 + 3350, Y3 + 450, "pose: resting (heal)", default="false")["execute"])
 pa2 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 + 200, "pose: resting", default="false")
 rwr = member_call(OBJC, "RemoveWeaponFromHands", X3 + 2850, Y3 + 400, as_pc, "weapon out of the hands again")
 g.link(pr["then"], rwr["execute"])
@@ -1079,7 +1104,21 @@ back = member_call(PC, "SetInteractionTarget", XG + 7500, YG, gc["AsPC"], "resum
                    [("Target", "object", dict(sub=ICOMP))])
 g.link(self_get("TargetSaved", "object", XG + 7400, YG + 260, sub=ICOMP), back["Target"])
 eq_g = member_call(PC, "EquipLastHeldItem", XG + 3750, YG + 250, gc["AsPC"], "weapon back (vanilla sit stores it)")
-chain(dlg, back)
+gpc2 = lib_pure(GS, "GameplayStatics", "GetPlayerController", XG + 3700, YG + 600,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("PlayerIndex", "int", dict(extra='DefaultValue="0",')),
+                 ("ReturnValue", "object", dict(sub=cls("/Script/Engine.PlayerController"), out=True))])["ReturnValue"]
+mkr = lib_pure(KML, "KismetMathLibrary", "MakeRotator", XG + 3900, YG + 600,
+               [("Roll", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
+                ("Pitch", "real", dict(subcat="float", extra='DefaultValue="-15.0",')),
+                ("Yaw", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
+                ("ReturnValue", "struct", dict(sub=ROT, out=True))])
+g.link(self_get("SeatYaw", "real", XG + 3700, YG + 800, subcat="double"), mkr["Yaw"])
+scr = member_call(cls("/Script/Engine.Controller"), "SetControlRotation", XG + 4100, YG, gpc2, "face the seat",
+                  [("NewRotation", "struct", dict(sub=ROT))])
+scr.pins["NewRotation"].ref = True
+scr.pins["NewRotation"].const = True
+g.link(mkr["ReturnValue"], scr["NewRotation"])
+chain(dlg, scr, back)
 
 gpc = lib_pure(GS, "GameplayStatics", "GetPlayerController", XG + 7800, YG + 450,
                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)),

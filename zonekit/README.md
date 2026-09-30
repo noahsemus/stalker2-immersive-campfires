@@ -458,3 +458,13 @@ items good, guitar: stays seated, no camera jank, put away returns to our seated
 re-equips the pistol after an item (`MG_fp_udp_equip`, hand 1) and it shows until the resting pose hides it; the body
 turns for a moment when the guitar comes out (the vanilla montage faces the actor = view direction, then the vanilla
 sit turns to the seat).
+
+## 2026-09-30 — build 33: release candidate
+
+Pistol hidden as soon as the game re-equips it (hand type change -> RemoveWeaponFromHands), `SetControlRotation`
+to the seat before the guitar hand-back (no body swing), healing a lost resting pose uses a 0.01 s blend.
+Noah: release candidate. The mouse-look drop is still there, also after leaving the campfire. Probe montage log:
+our pose montage changes only at item start / end (one change each, plus one ~60 ms after the re-equip), never
+periodically while idle; standing, the actor's tick does only cheap branches. Suspects outside the release: the
+dev probe itself (three `FindFirstOf` object-array scans every 0.5 s) and the dev box's UE4SS Lua mods
+(InventoryTabs background loop, UltraPlus, DarkerNights, WalkWithWheels).
