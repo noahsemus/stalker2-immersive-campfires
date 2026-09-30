@@ -413,6 +413,21 @@ def ca_restore(x, y, prev_then, label):
     return sq_["then_0"]
 
 
+def hands_hidden(x, y, prev_then, pc_pin, hidden, label):
+    """SetHiddenInGame on the in-hands mesh and the left-hand item mesh. Returns the last node."""
+    nodes = []
+    for k, getter in enumerate(("GetWeaponInHandsMeshComponent", "GetSecondaryHandItemMeshComponent")):
+        comp = member_pure(OBJC, getter, x + 300 * k, y + 250, pc_pin, [("ReturnValue", "object", dict(sub=SKM, out=True))])["ReturnValue"]
+        n = member_call(cls("/Script/Engine.SceneComponent"), "SetHiddenInGame", x + 300 * k, y, comp,
+                        f"{'hide' if hidden else 'show'} what the hands hold ({label})" if k == 0 else "",
+                        [("NewHidden", "bool", dict(extra=f'DefaultValue="{hidden}",')),
+                         ("bPropagateToChildren", "bool", dict(extra='DefaultValue="true",'))])
+        nodes.append(n)
+    g.link(prev_then, nodes[0]["execute"])
+    g.link(nodes[0]["then"], nodes[1]["execute"])
+    return nodes[1]
+
+
 def play_rest(x, y, comment, prev, blend_in=0.35):
     return play_additive(x, y, comment, prev, SIT_REST, blend_in)
 
@@ -1039,7 +1054,8 @@ cur_m = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 2450, Y3 - 450, anim,
 sim = self_set("ItemMontage", "object", X3 + 2550, Y3 - 350, "the item animation", sub=MONTCLS)
 g.link(cur_m, sim["ItemMontage"])
 g.link(brf["then"], sim["execute"])
-paf = play_additive(X3 + 2700, Y3 - 200, "free arms (additive legs)", sim, None, 0.1)
+shw_f = hands_hidden(X3 + 2650, Y3 - 650, sim["then"], as_pc, "false", "item starts")
+paf = play_additive(X3 + 3300, Y3 - 200, "free arms (additive legs)", shw_f, None, 0.1)
 pa1 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 - 200, "pose: free arms", default="true")
 g.link(paf["then"], pa1["execute"])
 par1 = self_set("PoseAR", "bool", X3 + 3250, Y3 - 200, "free arms on the item stance", default="true")
@@ -1093,7 +1109,8 @@ g.link(away["then"], lpa["execute"])
 g.link(isq["then_1"], brr["execute"])
 brh = branch(X3 + 2550, Y3 + 200, "coming from free arms?", self_get("PoseAdditive", "bool", X3 + 2450, Y3 + 350))
 g.link(brr["then"], brh["execute"])
-pr = play_rest_eased(X3 + 2700, Y3 + 200, "resting seated pose (arms settle, 1.5 s)", {"then": brh["then"]}, 1.5)
+hid_r = hands_hidden(X3 + 2650, Y3 + 100, brh["then"], as_pc, "true", "item done")
+pr = play_rest_eased(X3 + 3300, Y3 + 200, "resting seated pose (arms settle, 1.5 s)", hid_r, 1.5)
 prh = play_rest(X3 + 2700, Y3 + 450, "resting pose lost: back at once", {"then": brh["else"]}, 0.01)
 g.link(prh["then"], self_set("PoseAdditive", "bool", X3 + 3350, Y3 + 450, "pose: resting (heal)", default="false")["execute"])
 pa2 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 + 200, "pose: resting", default="false")
@@ -1392,7 +1409,8 @@ sa_s = stop_additive(XS + 1900, YS + 250, "seated pose off", yaw_on, other_get(C
 show_s = member_call(PC, "EnableInteractions", XS + 1350, YS + 250, sc["AsPC"], "interaction prompts back")
 rel_s = body_release(XS + 1100, YS - 700, sc["AsPC"], st2, "stand")
 chain(st1, st2)
-chain(rel_s, show_s, yaw_on)
+shw_s = hands_hidden(XS + 2600, YS - 700, rel_s["then"], sc["AsPC"], "false", "stand")
+chain(shw_s, show_s, yaw_on)
 chain(sa_s, ps, dl)
 g.link(dl["then"], mvs["execute"])
 lastr = restore_limits(XS + 10100, YS, "stand", mvs)
@@ -1457,7 +1475,7 @@ gt0 = self_set("LastPutAway", "real", XG + 1600, YG - 250, "guitar request time"
 g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", XG + 1500, YG - 450,
                 [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"],
        gt0["LastPutAway"])
-chain(g1, g2, gp0, gt0, show_g, gm, yaw_g)
+chain(g1, g2, gp0, gt0, gm, yaw_g)   # build 46: no EnableInteractions (its "Play guitar" hint flashed)
 lastg = restore_limits(XG + 2100, YG, "guitar", yaw_g)
 anim_g = member_pure(SKM, "GetAnimInstance", XG + 3100, YG + 450, other_get(CHAR, "Mesh", "object", XG + 2900, YG + 450, gc["AsPC"], sub=SKM),
                      [("ReturnValue", "object", dict(sub=ANIMI, out=True))])["ReturnValue"]
@@ -1489,7 +1507,8 @@ g.link(dlg["then"], scr["execute"])
 g.link(scr["then"], sar["execute"])
 rel_g = body_release(XG + 4700, YG, gc["AsPC"], sar, "guitar")
 loc_g = set_actor_loc(XG + 6200, YG, gc["AsPC"], self_get("SeatLoc", "struct", XG + 6050, YG + 250, sub=VEC), "on the seat spot")
-g.link(rel_g["then"], loc_g["execute"])
+shw_g = hands_hidden(XG + 6000, YG - 400, rel_g["then"], gc["AsPC"], "false", "guitar")
+g.link(shw_g["then"], loc_g["execute"])
 ca_g = member_pure(cls("/Script/Engine.ActorComponent"), "GetOwner", XG + 6300, YG + 500,
                    self_get("TargetSaved", "object", XG + 6150, YG + 500, sub=ICOMP), [("ReturnValue", "object", dict(sub=ACTOR, out=True))])["ReturnValue"]
 ca_loc = member_pure(ACTOR, "K2_GetActorLocation", XG + 6500, YG + 600, ca_g, [("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"]
