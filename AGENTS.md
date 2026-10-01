@@ -49,6 +49,9 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   stance layer in one frame: hips 8 cm, hands 30 cm = every "arm pops / reaches out" since build 59). Canary removed.
   Build 85 (same v1.0.0, before the Nexus upload; Noah: "beautiful"): the Sleeping Bag Mod stand-up stays unarmed
   (weapon the backpack close re-equips removed at once, hand meshes hidden while getting up, no weapon back).
+  Builds 86-87 (same v1.0.0; Noah: "looks great"): items used from the backpack (vanilla and PIR) no longer flip
+  rest / free arms every ~0.1 s: the item is the last montage the game started (`OnMontageStarted`, bound per anim
+  instance; ours skipped by play length > 1000 s), not `GetCurrentActiveMontage`.
 
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority

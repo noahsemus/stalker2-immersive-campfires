@@ -648,7 +648,7 @@ tc = player_cast(300, 0, "tick", [tick["then"]])
 as_pc = tc["AsPC"]
 sq = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), 600, 0, "tick steps")
 sq.pin("execute", "exec")
-for k in range(11):
+for k in range(12):
     sq.pin(f"then_{k}", "exec", out=True)
 g.link(tc["then"], sq["execute"])
 
@@ -1316,7 +1316,6 @@ g.link(rwe["then"], seq_eq["execute"])
 shd = self_set("SavedHand", "byte", X3 + 1700, Y3 - 250, "remember the hand", sub=HANDENUM)
 g.link(hand3, shd["SavedHand"])
 g.link(hsq["then_1"], shd["execute"])
-g.link(shd["then"], brb["execute"])
 now3 = lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X3 + 2000, Y3 + 650,
                 [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])
 # busy: remember when, switch to the free-arms (additive) pose once
@@ -1324,7 +1323,13 @@ lat = self_set("LastActionTime", "real", X3 + 2100, Y3 - 200, "arms busy now", s
 g.link(now3["ReturnValue"], lat["LastActionTime"])
 g.link(brb["then"], lat["execute"])
 brf = branch(X3 + 2400, Y3 - 200, "resting pose on?", b_not(X3 + 2300, Y3 - 50, self_get("PoseAdditive", "bool", X3 + 2200, Y3 - 50)))
-cur_n = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 2100, Y3 - 900, anim, [("ReturnValue", "object", dict(sub=MONTCLS, out=True))])["ReturnValue"]
+# build 87: the last montage the game started (step 11, OnMontageStarted). GetCurrentActiveMontage at this actor's
+# tick never gave the item started from the backpack, and gave our own resting pose as "the item" (probe, build 86:
+# rest / free arms every ~0.1 s for the whole item)
+cur_n = self_get("LastStarted", "object", X3 + 2100, Y3 - 900, sub=MONTCLS)
+lsa = member_pure(ANIMI, "Montage_IsActive", X3 + 2250, Y3 - 1100, anim, [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "bool", dict(out=True))])
+lsa.pins["Montage"].const = True
+g.link(cur_n, lsa["Montage"])
 nv = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 2300, Y3 - 950, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
 g.link(cur_n, nv["Object"])
 ne1 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 2300, Y3 - 850,
@@ -1339,9 +1344,28 @@ ne3 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 2300, Y3 
                [("A", "object", dict(sub=OBJ)), ("B", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
 g.link(cur_n, ne3["A"])
 g.link(self_get("LHMontage", "object", X3 + 2100, Y3 - 600, sub=MONTCLS), ne3["B"])
-brn = branch(X3 + 2500, Y3 - 1000, "newer item animation? (free arms on)",
-             b_and(X3 + 2450, Y3 - 800, b_and(X3 + 2400, Y3 - 850, nv["ReturnValue"], b_and(X3 + 2350, Y3 - 900, ne1["ReturnValue"], ne3["ReturnValue"])),
-                   b_and(X3 + 2350, Y3 - 700, ne2["ReturnValue"], self_get("PoseAdditive", "bool", X3 + 2200, Y3 - 650))))
+# build 86: never one of our own pose montages (dynamic: AnimMontage_<n>) and never a weapon (un)equip
+def not_ours_or_equip(x, y, mont_pin):
+    on = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", x, y, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+    g.link(mont_pin, on["Object"])
+    sw = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "StartsWith", x + 200, y,
+                  [("SourceString", "string"), ("InPrefix", "string", dict(extra='DefaultValue="AnimMontage_",')),
+                   ("SearchCase", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/CoreUObject.ESearchCase'\"", extra='DefaultValue="IgnoreCase",')),
+                   ("ReturnValue", "bool", dict(out=True))])
+    g.link(on["ReturnValue"], sw["SourceString"])
+    eq = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", x + 200, y + 100,
+                  [("SearchIn", "string"), ("Substring", "string", dict(extra='DefaultValue="equip",')),
+                   ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                   ("ReturnValue", "bool", dict(out=True))])
+    g.link(on["ReturnValue"], eq["SearchIn"])
+    return b_not(x + 400, y, b_or(x + 350, y + 50, sw["ReturnValue"], eq["ReturnValue"])), sw["ReturnValue"]
+
+
+nOurs, _ = not_ours_or_equip(X3 + 1900, Y3 - 1250, cur_n)
+brn = branch(X3 + 2500, Y3 - 1000, "newer item animation? (free arms on; before the busy test)",
+             b_and(X3 + 2500, Y3 - 750, b_and(X3 + 2450, Y3 - 800, b_and(X3 + 2400, Y3 - 850, nv["ReturnValue"], b_and(X3 + 2350, Y3 - 900, ne1["ReturnValue"], ne3["ReturnValue"])),
+                   b_and(X3 + 2350, Y3 - 700, ne2["ReturnValue"], self_get("PoseAdditive", "bool", X3 + 2200, Y3 - 650))),
+                   b_and(X3 + 2450, Y3 - 650, nOurs, lsa["ReturnValue"])))
 lmn = lib_pure(KML, "KismetMathLibrary", "FMin", X3 + 2200, Y3 - 1300,
                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
                 ("ReturnValue", "real", dict(subcat="double", out=True))])
@@ -1358,13 +1382,14 @@ spr = self_set("PrevRH", "struct", X3 + 2800, Y3 - 1700, "right hand (chest spac
 g.link(HR, spr["PrevRH"])
 g.link(slm["then"], sft2["execute"])
 chain(sft2, spl, spr)
-g.link(spr["then"], brn["execute"])
+g.link(spr["then"], brf["execute"])
+g.link(shd["then"], brn["execute"])
 sim2 = self_set("ItemMontage", "object", X3 + 2800, Y3 - 1000, "follow the newer item animation", sub=MONTCLS)
 g.link(cur_n, sim2["ItemMontage"])
 g.link(brn["then"], sim2["execute"])
-g.link(sim2["then"], brf["execute"])
-g.link(brn["else"], brf["execute"])
-cur_m = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 2450, Y3 - 450, anim, [("ReturnValue", "object", dict(sub=MONTCLS, out=True))])["ReturnValue"]
+g.link(sim2["then"], brb["execute"])
+g.link(brn["else"], brb["execute"])
+cur_m = self_get("LastStarted", "object", X3 + 2450, Y3 - 450, sub=MONTCLS)   # build 87
 sim = self_set("ItemMontage", "object", X3 + 2550, Y3 - 350, "the item animation", sub=MONTCLS)
 g.link(cur_m, sim["ItemMontage"])
 lhr = self_set("LHMin", "real", X3 + 2450, Y3 - 550, "left hand: new item", subcat="double")
@@ -1373,7 +1398,22 @@ g.link(release(X3 + 2300, Y3 - 3000, brf["then"], "new item", False), lhr["execu
 ftz = self_set("FastTicks", "int", X3 + 2600, Y3 - 550, "new item: no fast ticks yet", default="0")
 g.link(lhr["then"], ftz["execute"])
 g.link(ftz["then"], sim["execute"])
-shw_f = hands_hidden(X3 + 2650, Y3 - 650, sim["then"], as_pc, "false", "item starts")
+lsa2 = member_pure(ANIMI, "Montage_IsActive", X3 + 2500, Y3 - 1450, anim, [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "bool", dict(out=True))])
+lsa2.pins["Montage"].const = True
+g.link(cur_m, lsa2["Montage"])
+lsv2 = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 2500, Y3 - 1350, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(cur_m, lsv2["Object"])
+brO = branch(X3 + 2750, Y3 - 450, "no running item montage started?",
+             b_not(X3 + 2700, Y3 - 1400, b_and(X3 + 2650, Y3 - 1400, lsv2["ReturnValue"], lsa2["ReturnValue"])))
+g.link(sim["then"], brO["execute"])
+simN = self_set("ItemMontage", "object", X3 + 2950, Y3 - 550, "no item montage known (slots tell when it ends)", sub=MONTCLS)
+g.link(brO["then"], simN["execute"])
+sqO = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X3 + 3150, Y3 - 450, "")
+sqO.pin("execute", "exec")
+sqO.pin("then_0", "exec", out=True)
+g.link(simN["then"], sqO["execute"])
+g.link(brO["else"], sqO["execute"])
+shw_f = hands_hidden(X3 + 2650, Y3 - 650, sqO["then_0"], as_pc, "false", "item starts")
 pa1 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 - 200, "pose: free arms", default="true")
 # build 67: drinks get their own table (make_sit_drink.py): the left arm stays in the lap instead of lifting
 DRINK_TABLES = []   # build 69: off (see make_sit_drink.py); was energy_drink, water, vodka, beer
@@ -1534,7 +1574,11 @@ sen = self_set("EndedMontage", "object", X3 + 2450, Y3 - 100, "item done: rememb
 g.link(self_get("ItemMontage", "object", X3 + 2300, Y3 + 50, sub=MONTCLS), sen["EndedMontage"])
 sfz = self_set("FrozenMontage", "object", X3 + 2450, Y3 - 400, "item to hold at its end", sub=MONTCLS)
 g.link(self_get("ItemMontage", "object", X3 + 2300, Y3 - 250, sub=MONTCLS), sfz["FrozenMontage"])
-g.link(brh["then"], sfz["execute"])
+ivh = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 2550, Y3 - 550, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("ItemMontage", "object", X3 + 2400, Y3 - 550, sub=MONTCLS), ivh["Object"])
+brIV = branch(X3 + 2650, Y3 + 200, "an item to hold?", ivh["ReturnValue"])
+g.link(brh["then"], brIV["execute"])
+g.link(brIV["then"], sfz["execute"])
 frz = member_call(ANIMI, "Montage_SetPlayRate", X3 + 2200, Y3 - 700, anim, "hold the item before its reach", [
     ("Montage", "object", dict(sub=MONTCLS)), ("NewPlayRate", "real", dict(subcat="float", extra='DefaultValue="0.000100",'))])
 frz.pins["Montage"].const = True
@@ -1545,6 +1589,7 @@ g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X3 + 2550, Y
                 [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"], sft["FrozenT"])
 g.link(frz["then"], sft["execute"])
 g.link(sft["then"], sen["execute"])
+g.link(brIV["else"], sen["execute"])
 slw = self_set("ItemMontage", "object", X3 + 2600, Y3 - 100, "item done: forget it", sub=MONTCLS)
 g.link(sen["then"], slw["execute"])
 hid_r = hands_hidden(X3 + 2650, Y3 + 100, slw["then"], as_pc, "true", "item done")
@@ -2526,6 +2571,56 @@ br9e = branch(X9 + 500, Y9 + 2400, "getting up for the bag?", b_and(X9 + 300, Y9
                                                                    self_get("Standing", "bool", X9 + 100, Y9 + 2600)))
 g.link(sq9["then_4"], br9e["execute"])
 hands_hidden(X9 + 800, Y9 + 2400, br9e["then"], as_pc, "true", "getting up for the bag")
+
+# ---- 11 (build 87): every montage the game starts (OnMontageStarted): remember the last one that is not ours
+#      (our pose montages loop 1,000,000 times: play length > 1000 s) and not a weapon (un)equip ----
+X11, Y11 = 400, 17200
+g.box("EdGraphNode_Comment_916", X11 - 80, Y11 - 300, 3200, 1100, "Item animations: remember the last montage the game started")
+bv11 = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X11 + 100, Y11 + 250, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(anim, bv11["Object"])
+bne11 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X11 + 100, Y11 + 350,
+                 [("A", "object", dict(sub=OBJ)), ("B", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(anim, bne11["A"])
+g.link(self_get("BoundAnim", "object", X11 - 100, Y11 + 400, sub=ANIMI), bne11["B"])
+br11 = branch(X11 + 300, Y11, "anim instance not bound yet?", b_and(X11 + 250, Y11 + 300, bv11["ReturnValue"], bne11["ReturnValue"]))
+g.link(sq["then_11"], br11["execute"])
+EVN = "OnGameMontageStarted"
+add11 = exec_pins(Node(g, BG + "K2Node_AddDelegate", nm("K2Node_AddDelegate"), X11 + 600, Y11, "bind: montage started",
+                       [f'DelegateReference=(MemberParent={ANIMI},MemberName="OnMontageStarted")']))
+add11.pin("self", "object", sub=ANIMI, extra='PinFriendlyName=NSLOCTEXT("K2Node", "BaseMCDelegateSelfPinName", "Target"),')
+add11.pin("Delegate", "delegate", extra='PinFriendlyName=NSLOCTEXT("K2Node", "PinFriendlyDelegatetName", "Event"),')
+add11.pins["Delegate"].member_ref = 'MemberParent="/Script/CoreUObject.Package' + "'/Script/Engine'" + '",MemberName="OnMontageStartedMCDelegate__DelegateSignature"'
+g.link(anim, add11["self"])
+g.link(br11["then"], add11["execute"])
+sb11 = self_set("BoundAnim", "object", X11 + 950, Y11, "bound to this anim instance", sub=ANIMI)
+g.link(anim, sb11["BoundAnim"])
+g.link(add11["then"], sb11["execute"])
+ev11 = Node(g, BG + "K2Node_CustomEvent", nm("K2Node_CustomEvent"), X11, Y11 + 500, "the game started a montage",
+            [f'CustomFunctionName="{EVN}"',
+             'CustomProperties UserDefinedPin (PinName="Montage",PinType=(PinCategory="object",PinSubCategoryObject=' + MONT + '),DesiredPinDirection=EGPD_Output)'])
+ev11.pin("OutputDelegate", "delegate", out=True)
+ev11.pins["OutputDelegate"].member_ref = f'MemberName="{EVN}",bSelfContext=True'
+ev11.pin("then", "exec", out=True)
+ev11.pin("Montage", "object", sub=MONT, out=True)
+g.link(ev11["OutputDelegate"], add11["Delegate"])
+len11 = member_pure(ANIMSEQB, "GetPlayLength", X11 + 300, Y11 + 750, ev11["Montage"], [("ReturnValue", "real", dict(subcat="float", out=True))])
+lt11 = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X11 + 500, Y11 + 750,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="1000.0",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(len11["ReturnValue"], lt11["A"])
+on11 = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X11 + 300, Y11 + 850, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(ev11["Montage"], on11["Object"])
+eq11 = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X11 + 500, Y11 + 850,
+                [("SearchIn", "string"), ("Substring", "string", dict(extra='DefaultValue="equip",')),
+                 ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(on11["ReturnValue"], eq11["SearchIn"])
+bm11 = branch(X11 + 700, Y11 + 500, "an item / PDA / backpack montage? (not our pose, not a weapon draw)",
+              b_and(X11 + 650, Y11 + 750, lt11["ReturnValue"], b_not(X11 + 650, Y11 + 850, eq11["ReturnValue"])))
+g.link(ev11["then"], bm11["execute"])
+sl11 = self_set("LastStarted", "object", X11 + 1000, Y11 + 500, "the last montage the game started", sub=MONTCLS)
+g.link(ev11["Montage"], sl11["LastStarted"])
+g.link(bm11["then"], sl11["execute"])
 
 # ---- 10 (build 57): getting up: the camera (ours) eases from the seated view to level, body-forward ----
 X10, Y10 = 400, 15600

@@ -275,6 +275,26 @@ public:
             now % 100000, act, pa, BoolVar(m_bAct, STR("PoseAR")) ? 1 : 0, BoolVar(m_bAct, STR("CamUnhooked")) ? 1 : 0, DblVar(m_bAct, STR("BodyYaw")), DblVar(m_bAct, STR("SeatYaw")),
             lf.X - a.X, lf.Y - a.Y, lf.Z - a.Z, rh.X - a.X, rh.Y - a.Y, rh.Z - a.Z, lh.X - a.X, lh.Y - a.Y, lh.Z - a.Z, sp.X - a.X, sp.Y - a.Y, sp.Z - a.Z, hp.X - a.X, hp.Y - a.Y, hp.Z - a.Z, mont.c_str());
         Output::send<LogLevel::Verbose>(STR("[CampProbe] tr {}\n"), StringType(b));
+        // build 86: the item-tracking state behind "busy" (backpack items loop rest / free arms every ~0.1 s)
+        auto nm = [](UObject* o) { return o ? o->GetName() : StringType(STR("-")); };
+        UObject* im = ObjProp(m_bAct, STR("ItemMontage")); UObject* em = ObjProp(m_bAct, STR("EndedMontage")); UObject* fm = ObjProp(m_bAct, STR("FrozenMontage"));
+        int slots = 0; const wchar_t* sn[5] = { L"MainActionSlot", L"DefaultSlot", L"UpperBody", L"LeftHand", L"RightHand" };
+        if (anim) if (UFunction* f = anim->GetFunctionByNameInChain(FName(STR("IsSlotActive"))))
+            for (int i = 0; i < 5; ++i) { struct { FName N; bool R = false; } q{}; q.N = FName(sn[i]); if (GuardedPE(anim, f, &q) && q.R) slots |= 1 << i; }
+        int imPlay = -1, emAct = -1; float imPos = -1.f, imLen = -1.f;
+        if (anim && im) {
+            if (UFunction* f = anim->GetFunctionByNameInChain(FName(STR("Montage_IsPlaying")))) { struct { UObject* M; bool R = false; } q{ im }; if (GuardedPE(anim, f, &q)) imPlay = q.R; }
+            if (UFunction* f = anim->GetFunctionByNameInChain(FName(STR("Montage_GetPosition")))) { struct { UObject* M; float R = 0; } q{ im }; if (GuardedPE(anim, f, &q)) imPos = q.R; }
+            if (UFunction* f = im->GetFunctionByNameInChain(FName(STR("GetPlayLength")))) { struct { float R = 0; } q{}; if (GuardedPE(im, f, &q)) imLen = q.R; }
+        }
+        if (anim && em) if (UFunction* f = anim->GetFunctionByNameInChain(FName(STR("Montage_IsActive")))) { struct { UObject* M; bool R = false; } q{ em }; if (GuardedPE(anim, f, &q)) emAct = q.R; }
+        int ft = 0; if (FProperty* p = m_bAct->GetPropertyByNameInChain(STR("FastTicks"))) { int32_t* v = p->ContainerPtrToValuePtr<int32_t>(m_bAct); if (v) ft = *v; }
+        wchar_t s2[600];
+        swprintf_s(s2, 600, L"t=%llu slots=%d hand=%d pda=%d bag=%d IM=%s play=%d pos=%.2f len=%.2f EM=%s act=%d FM=%s FT=%d LAT=%.2f FrT=%.2f pose=%s LS=%s",
+            now % 100000, slots, CallByte(m_bPawn, STR("GetMainHandEquipType")), CallBool(m_bPawn, STR("IsUsingPDA")), CallBool(m_bPawn, STR("IsUsingBackpack")),
+            nm(im).c_str(), imPlay, imPos, imLen, nm(em).c_str(), emAct, nm(fm).c_str(), ft, DblVar(m_bAct, STR("LastActionTime")), DblVar(m_bAct, STR("FrozenT")),
+            nm(ObjProp(m_bAct, STR("PoseMontage"))).c_str(), nm(ObjProp(m_bAct, STR("LastStarted"))).c_str());
+        Output::send<LogLevel::Verbose>(STR("[CampProbe] st {}\n"), StringType(s2));
     }
     // visible widgets while seated (build 49: which widget shows the "Play guitar" hint; does the Sleeping Bag Mod
     // popup exist): once a second, log the classes that appear / disappear

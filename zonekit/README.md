@@ -486,3 +486,18 @@ the bag is used, `RemoveWeaponFromHands` right after the backpack close; each ti
 `SetHiddenInGame(true)` on the in-hands and left-hand item meshes; at the stand-up end with `BagPending`,
 `RemoveWeaponFromHands` again, meshes shown (empty), no weapon back. Noah: "beautiful". Not yet on Nexus, so the
 v1.0.0 zip, tag and GitHub release were replaced.
+
+## 2026-10-01 — builds 86-87: items from the backpack (folded into v1.0.0)
+
+Noah: modded food / drink / cigarettes bounce the camera and flicker the item. Probe: every item used from the
+backpack (vanilla too) flipped rest / free arms every ~0.1 s. As the item starts, the backpack montage stops; the
+stopped `ItemMontage` read as "item ended" (rest), then the item made the arms busy again and the item start took
+`GetCurrentActiveMontage` = our own just-started resting pose as the item, which read as stopped at once: loop.
+Build 86 (name filter "AnimMontage_" + follow-newer before the busy test) and build 87 were first tested with the
+Vortex v1.0.0 copy still installed: its NewContent pak (same file name, same order) won, so the game ran the old
+graph ("no change" twice; harness `install_paktest.ps1` now warns). With the Vortex copy disabled, build 87: the item
+is `LastStarted`, set by `OnMontageStarted` (bound once per anim instance, tick step 11) for montages with play length
+< 1000 s (our pose montages loop 1e6 times) and no "equip" in the name; follow-newer and item start read it (only if
+`Montage_IsActive`); rest start holds the item only if one is known (`Montage_SetPlayRate(None)` sets every active
+montage). Probe: Smokes from the backpack 1 transition (was 77). Noah: "looks great".
+
