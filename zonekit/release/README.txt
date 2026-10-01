@@ -31,7 +31,7 @@ HOW TO USE
 
 SLEEPING BAG MOD
   With the Sleeping Bag Mod installed, using the sleeping bag while seated makes
-  Skif stand up and opens its "how many hours" window; confirm to lie down and
+  Skif stand up, unarmed, and opens its "how many hours" window; confirm to lie down and
   sleep by the fire.
 
 MODDED ITEMS

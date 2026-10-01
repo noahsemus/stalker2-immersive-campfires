@@ -15,7 +15,7 @@ Vanilla locks the campfire sit to a handful of keys. This mod keeps Skif seated 
 [*][b]Guitar[/b] with G as usual; put it away and you are seated again. The "Play the guitar" prompt no longer pops up.
 [*][b]Clean stand-up:[/b] any movement key, jump, interact or Esc. No sliding, the body does not turn, the view settles forward, and your weapon comes back.
 [*][b]Your own key bindings[/b] from Options > Controls work while seated.
-[*][b]Sleeping Bag Mod compatible:[/b] use the sleeping bag while seated to stand up and get its sleep window.
+[*][b]Sleeping Bag Mod compatible:[/b] use the sleeping bag while seated to stand up, unarmed, and get its sleep window.
 [/list]
 
 [size=4][b]Requirements[/b][/size]

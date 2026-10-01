@@ -2045,7 +2045,14 @@ sqSH.pin("then_0", "exec", out=True)
 g.link(clr["then"], sqSH["execute"])
 g.link(brSH["else"], eq_s["execute"])
 g.link(eq_s["then"], sqSH["execute"])
-g.link(lastr["then"], brSH["execute"])
+# build 85: stood up for the Sleeping Bag Mod -> stay unarmed: the weapon the game put back when the backpack
+# closed is taken out of the hands, the hidden hand meshes are shown again (empty), no weapon back
+brBag = branch(XS + 10300, YS - 800, "stood up for the sleeping bag? (stay unarmed)", self_get("BagPending", "bool", XS + 10150, YS - 650))
+g.link(lastr["then"], brBag["execute"])
+g.link(brBag["else"], brSH["execute"])
+rwz = member_call(OBJC, "RemoveWeaponFromHands", XS + 10600, YS - 800, sc["AsPC"], "no weapon (sleeping bag)")
+g.link(brBag["then"], rwz["execute"])
+g.link(hands_hidden(XS + 10900, YS - 800, rwz["then"], sc["AsPC"], "false", "up for the bag")["then"], clr["execute"])
 g.link(sqSH["then_0"], lvl["execute"])
 chain(lvl, he1, he2, he3, yaw_on, rli, rmi)
 
@@ -2336,10 +2343,10 @@ chain(o7a, o7b, o7c, o7d, o7e)
 #      at our campfires it refused: a sleepy groan, no popup. We take the use first (its tick waits for ours), stand up,
 #      then call its "On Widget Init" (the hours popup; confirm = lay down and sleep). No-op without the mod. ----
 X9, Y9 = 400, 12600
-g.box("EdGraphNode_Comment_914", X9 - 80, Y9 - 300, 7600, 2600, "Sleeping Bag Mod: the bag used while seated = stand up, then its sleep popup")
+g.box("EdGraphNode_Comment_914", X9 - 80, Y9 - 300, 7600, 3100, "Sleeping Bag Mod: the bag used while seated = stand up, then its sleep popup")
 sq9 = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X9, Y9, "sleeping bag steps")
 sq9.pin("execute", "exec")
-for k in range(4):
+for k in range(5):
     sq9.pin(f"then_{k}", "exec", out=True)
 g.link(sq["then_9"], sq9["execute"])
 AKRTPC = cls("/Script/AkAudio.AkRtpc")
@@ -2455,7 +2462,9 @@ g.link(br9u["then"], rrt["execute"])
 bpc = member_call(PC, "OnBackpackUseEnded", X9 + 1850, Y9 + 900, as_pc, "close the backpack")
 g.link(rrt["then"], bpc["execute"])
 bp9 = self_set("BagPending", "bool", X9 + 1950, Y9 + 1100, "sleep popup after standing up", default="true")
-g.link(bpc["then"], bp9["execute"])
+rwb = member_call(OBJC, "RemoveWeaponFromHands", X9 + 1950, Y9 + 900, as_pc, "no weapon (sleeping bag)")
+g.link(bpc["then"], rwb["execute"])
+g.link(rwb["then"], bp9["execute"])
 g.link(bp9["then"], sc["execute"])     # into "Stand up" (same as pressing W)
 
 # 9d: stood up: open the mod's sleep popup
@@ -2511,6 +2520,12 @@ tmr.pin("ReturnValue", "struct", sub="\"/Script/CoreUObject.ScriptStruct'/Script
 g.link(fe9["Array Element"], tmr["Object"])
 g.link(sdn["then"], tmr["execute"])
 g.link(fe9["Completed"], self_set("SBMDone", "bool", X9 + 1750, Y9 + 2200, "ready for the next bag use", default="false")["execute"])
+
+# 9e (build 85): getting up for the bag: hands hold nothing visible (shown again when up)
+br9e = branch(X9 + 500, Y9 + 2400, "getting up for the bag?", b_and(X9 + 300, Y9 + 2550, self_get("BagPending", "bool", X9 + 100, Y9 + 2500),
+                                                                   self_get("Standing", "bool", X9 + 100, Y9 + 2600)))
+g.link(sq9["then_4"], br9e["execute"])
+hands_hidden(X9 + 800, Y9 + 2400, br9e["then"], as_pc, "true", "getting up for the bag")
 
 # ---- 10 (build 57): getting up: the camera (ours) eases from the seated view to level, body-forward ----
 X10, Y10 = 400, 15600

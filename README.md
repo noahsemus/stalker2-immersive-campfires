@@ -21,7 +21,7 @@ seated and lets the game do all of it.
 - **Clean stand-up.** Any movement key, jump, interact or Esc stands you up; no sliding, the body does not turn and
   the view settles level and forward. Your weapon comes back.
 - **Your own key bindings** from Options > Controls work while seated.
-- **Sleeping Bag Mod compatible:** use the sleeping bag while seated to stand up and get its sleep window.
+- **Sleeping Bag Mod compatible:** use the sleeping bag while seated to stand up, unarmed, and get its sleep window.
 
 ## Requirements
 

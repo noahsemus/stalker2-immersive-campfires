@@ -9,6 +9,6 @@ Stay seated at the campfire and use it like a real rest stop:
 - Play the guitar with G as usual; the "Play the guitar" prompt no longer pops up.
 - Stand up with any movement key, jump, interact or Esc: no sliding, no body turn, the view settles forward, your weapon comes back.
 - Your own key bindings work while seated.
-- Sleeping Bag Mod: use the bag while seated to stand up and open its sleep window.
+- Sleeping Bag Mod: use the bag while seated to stand up (unarmed) and open its sleep window.
 
 Pure pak mod, no UE4SS. Overrides IMC_PlayerCA and HUDContextualLegend only.

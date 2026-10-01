@@ -477,3 +477,12 @@ rotation and pointed at (look pitch from `ClampedControlPitch`, yaw = the actor'
 Actions (free arms), stand-up and the guitar hand-back put the mesh and camera back (camera relative rotation saved
 at the takeover). Noah: body jitter gone, guitar seamless, best RC so far. New: a second shadow turning with the view
 (`PC.ShadowMeshComponent` is its own component under the actor), camera control lost for a moment at item start / end.
+
+## 2026-10-01 — build 85: Sleeping Bag Mod stand-up stays unarmed (folded into v1.0.0)
+
+Using the bag while seated closes the backpack (`OnBackpackUseEnded`), and the game re-equips the weapon then: it
+floated in view during the sit "Out" animation, and the stand-up's `EquipLastHeldItem` drew it again. Build 85: when
+the bag is used, `RemoveWeaponFromHands` right after the backpack close; each tick while `Standing && BagPending`,
+`SetHiddenInGame(true)` on the in-hands and left-hand item meshes; at the stand-up end with `BagPending`,
+`RemoveWeaponFromHands` again, meshes shown (empty), no weapon back. Noah: "beautiful". Not yet on Nexus, so the
+v1.0.0 zip, tag and GitHub release were replaced.

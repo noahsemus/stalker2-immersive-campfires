@@ -47,6 +47,8 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   (per-item measured times, live hand-speed check for modded items) while the rest pose blends in (0.55 s), camera
   stays on the head until the item is let go, and NO RemoveWeaponFromHands when the arms leave an item (it swapped the
   stance layer in one frame: hips 8 cm, hands 30 cm = every "arm pops / reaches out" since build 59). Canary removed.
+  Build 85 (same v1.0.0, before the Nexus upload; Noah: "beautiful"): the Sleeping Bag Mod stand-up stays unarmed
+  (weapon the backpack close re-equips removed at once, hand meshes hidden while getting up, no weapon back).
 
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
