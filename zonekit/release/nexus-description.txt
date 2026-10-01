@@ -1,0 +1,36 @@
+[size=5][b]Immersive Campfires[/b][/size]
+
+Stay seated at the campfire: eat, drink, heal, open the PDA and backpack and play the guitar without getting up, with the full first-person animations.
+
+Vanilla locks the campfire sit to a handful of keys. This mod keeps Skif seated and lets the game do the rest.
+
+[b]Pure pak mod. No UE4SS.[/b] Built with the official S.T.A.L.K.E.R. 2 Zone Kit.
+
+[size=4][b]Features[/b][/size]
+[list]
+[*][b]Use items while seated:[/b] food, drinks, medkits, bandages, injectors and other consumables, from the quick slots, the item wheel or the backpack, with their full animations. Modded items (Project Itemization Reborn and others) work too.
+[*][b]PDA and backpack[/b] open while seated.
+[*][b]Free look.[/b] The body and legs stay planted on the seat while you look around.
+[*][b]Natural arms.[/b] After an item the arms ease into the lap, with no reaching for an invisible weapon.
+[*][b]Guitar[/b] with G as usual; put it away and you are seated again. The "Play the guitar" prompt no longer pops up.
+[*][b]Clean stand-up:[/b] any movement key, jump, interact or Esc. No sliding, the body does not turn, the view settles forward, and your weapon comes back.
+[*][b]Your own key bindings[/b] from Options > Controls work while seated.
+[*][b]Sleeping Bag Mod compatible:[/b] use the sleeping bag while seated to stand up and get its sleep window.
+[/list]
+
+[size=4][b]Requirements[/b][/size]
+STALKER 2 (Steam or Epic), current patch. Nothing else.
+
+[size=4][b]Installation[/b][/size]
+[b]Vortex:[/b] install and deploy.
+[b]Manual:[/b] copy the six files from the zip into [i]<game>\Stalker2\Content\Paks\~mods\[/i] (create the ~mods folder if it doesn't exist). Don't rename them.
+[b]Uninstall:[/b] delete the six files. Safe to remove at any time; nothing is stored in your save.
+
+[size=4][b]Compatibility[/b][/size]
+Overrides two game assets: [i]IMC_PlayerCA[/i] (the seated controls) and [i]HUDContextualLegend[/i] (the small key-hint line at the bottom of the screen, hidden; it also carried the drop-body and dialogue-skip hints). A mod replacing either of those conflicts; the one loaded last wins. No config files are changed. Everything else runs in the mod's own Blueprint, so animation, weapon and HUD mods are unaffected.
+Works alongside [url=https://www.nexusmods.com/stalker2heartofchornobyl/mods/2698]Immersive Dialogue[/url].
+
+[size=4][b]Source[/b][/size]
+[url=https://github.com/noahsemus/stalker2-immersive-campfires]GitHub[/url]: source and build instructions.
+
+Slava Ukraini.

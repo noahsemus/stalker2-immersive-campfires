@@ -43,6 +43,11 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   weapon draw after items cut at once, pose tables start on the right frame. Open: the body jumps / shifts after an
   item animation.
 
+- 2026-10-01 v1.0.0 released (Noah: "FINALLY it works"). Builds 78-84: the item is held just before its final reach
+  (per-item measured times, live hand-speed check for modded items) while the rest pose blends in (0.55 s), camera
+  stays on the head until the item is let go, and NO RemoveWeaponFromHands when the arms leave an item (it swapped the
+  stance layer in one frame: hips 8 cm, hands 30 cm = every "arm pops / reaches out" since build 59). Canary removed.
+
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
   Exclusive; W/A/S/D/Space/F/Esc = `IA_PlayerCAExit`). While any interaction is in progress native PDA / backpack /

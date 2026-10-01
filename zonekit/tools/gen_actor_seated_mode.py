@@ -983,6 +983,44 @@ if USE_LEGS_LAYER:
     chain(lay_in, stopv)
 
 
+def release(x, y, prev_then, label, need_time):
+    """If an item is held: play it on (rate 1) and forget it. need_time: only once the rest pose is fully in."""
+    fv = lib_pure(KSL, "KismetSystemLibrary", "IsValid", x, y + 250, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+    g.link(self_get("FrozenMontage", "object", x - 150, y + 250, sub=MONTCLS), fv["Object"])
+    cond = fv["ReturnValue"]
+    if need_time:
+        el = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", x, y + 350,
+                      [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                       ("ReturnValue", "real", dict(subcat="double", out=True))])
+        g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", x - 200, y + 350,
+                        [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"], el["A"])
+        g.link(self_get("FrozenT", "real", x - 200, y + 450, subcat="double"), el["B"])
+        gt = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", x + 150, y + 350,
+                      [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.7",')),
+                       ("ReturnValue", "bool", dict(out=True))])
+        g.link(el["ReturnValue"], gt["A"])
+        held = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", x + 150, y + 450,
+                        [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                         ("ReturnValue", "bool", dict(out=True))])
+        g.link(self_get("FrozenT", "real", x, y + 500, subcat="double"), held["A"])
+        cond = b_and(x + 250, y + 300, cond, b_and(x + 200, y + 400, gt["ReturnValue"], held["ReturnValue"]))
+    br = branch(x + 300, y, f"item held? ({label})", cond)
+    g.link(prev_then, br["execute"])
+    rr = member_call(ANIMI, "Montage_SetPlayRate", x + 600, y, anim, f"let the held item finish ({label})", [
+        ("Montage", "object", dict(sub=MONTCLS)), ("NewPlayRate", "real", dict(subcat="float", extra='DefaultValue="1.000000",'))])
+    rr.pins["Montage"].const = True
+    g.link(self_get("FrozenMontage", "object", x + 450, y + 250, sub=MONTCLS), rr["Montage"])
+    g.link(br["then"], rr["execute"])
+    cl = self_set("FrozenMontage", "object", x + 900, y, "", sub=MONTCLS)
+    g.link(rr["then"], cl["execute"])
+    sq_ = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), x + 1150, y, "")
+    sq_.pin("execute", "exec")
+    sq_.pin("then_0", "exec", out=True)
+    g.link(cl["then"], sq_["execute"])
+    g.link(br["else"], sq_["execute"])
+    return sq_["then_0"]
+
+
 # ---- 3: keep seated ----
 X3, Y3 = 1200, 900
 g.box("EdGraphNode_Comment_904", X3 - 80, Y3 - 320, 3400, 1300, "Keep seated: no walking, look limits, pose")
@@ -1079,6 +1117,33 @@ ilast = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X3 + 1500, Y3 + 
                  [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.15",')),
                   ("ReturnValue", "bool", dict(out=True))])
 g.link(irem["ReturnValue"], ilast["A"])
+# build 79: every item animation ends by reaching the hands forward to where the weapon would be (its last 0.1-1.1 s,
+# measured from the game's sequences: frames where both hands close in on the final pose, zonekit README). Seated
+# there is no weapon: that reach was the "hand goes out and forward, then eases into the lap" (and the injector's
+# hands going up). The arms now leave the item just before its reach starts.
+REACH = [("antirad", 0.25), ("bandage", 0.18), ("beer", 0.18), ("bread", 0.82), ("canned_food", 0.45),
+         ("condensed_milk", 1.12), ("energy_drink", 0.28), ("medkit", 0.38), ("pills", 0.31), ("sausage", 0.15),
+         ("vodka", 0.38), ("water", 0.18), ("backpack", 0.30)]
+rnm = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X3 + 700, Y3 + 2400,
+               [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(itm, rnm["Object"])
+thr = None
+known = None
+for k, (word, secs) in enumerate(REACH):
+    cn = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 900, Y3 + 2400 + 90 * k,
+                  [("SearchIn", "string"), ("Substring", "string", dict(extra=f'DefaultValue="{word}",')),
+                   ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                   ("ReturnValue", "bool", dict(out=True))])
+    g.link(rnm["ReturnValue"], cn["SearchIn"])
+    sf = lib_pure(KML, "KismetMathLibrary", "SelectFloat", X3 + 1100, Y3 + 2400 + 90 * k,
+                  [("A", "real", dict(subcat="double", extra=f'DefaultValue="{secs}",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.3",')),
+                   ("bPickA", "bool", dict(extra='DefaultValue="false",')), ("ReturnValue", "real", dict(subcat="double", out=True))])
+    g.link(cn["ReturnValue"], sf["bPickA"])
+    known = cn["ReturnValue"] if known is None else b_or(X3 + 1050, Y3 + 2440 + 90 * k, known, cn["ReturnValue"])
+    if thr is not None:
+        g.link(thr, sf["B"])
+    thr = sf["ReturnValue"]
+g.link(thr, ilast["B"])
 # build 45: Montage_IsPlaying(None) means "any montage playing" and a None length is 0: with no item captured yet
 # the test read "ending" and blocked every item. Require a captured montage that is not our own pose.
 ival = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 900, Y3 + 1700,
@@ -1089,7 +1154,74 @@ inot = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 900, Y3 
 g.link(itm, inot["A"])
 g.link(self_get("PoseMontage", "object", X3 + 700, Y3 + 1850, sub=MONTCLS), inot["B"])
 iok = b_and(X3 + 1100, Y3 + 1750, ival["ReturnValue"], inot["ReturnValue"])
-ending = b_and(X3 + 1700, Y3 + 1400, b_and(X3 + 1500, Y3 + 1700, iok, iplay["ReturnValue"]), ilast["ReturnValue"])   # build 77: no "Out" rule
+sp3t = member_pure(SC_, "GetSocketTransform", X3 + 500, Y3 + 3600, mesh,
+                   [("InSocketName", "name", dict(extra='DefaultValue="jnt_spine_03",')),
+                    ("TransformSpace", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/Engine.ERelativeTransformSpace'\"", extra='DefaultValue="RTS_World",')),
+                    ("ReturnValue", "struct", dict(sub="\"/Script/CoreUObject.ScriptStruct'/Script/CoreUObject.Transform'\"", out=True))])["ReturnValue"]
+
+
+def hand_local(x, y, sock):
+    hl = member_pure(SKM, "GetSocketLocation", x, y + 100, mesh,
+                     [("InSocketName", "name", dict(extra=f'DefaultValue="{sock}",')), ("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"]
+    it = lib_pure(KML, "KismetMathLibrary", "InverseTransformLocation", x + 200, y,
+                  [("T", "struct", dict(sub="\"/Script/CoreUObject.ScriptStruct'/Script/CoreUObject.Transform'\"")), ("Location", "struct", dict(sub=VEC)),
+                   ("ReturnValue", "struct", dict(sub=VEC, out=True))])
+    g.link(sp3t, it["T"])
+    g.link(hl, it["Location"])
+    return it["ReturnValue"]
+
+
+HL = hand_local(X3 + 700, Y3 + 3600, "jnt_l_hand")
+HR = hand_local(X3 + 700, Y3 + 3800, "jnt_r_hand")
+
+
+def speed(x, y, cur, var):
+    sb = lib_pure(KML, "KismetMathLibrary", "Subtract_VectorVector", x, y,
+                  [("A", "struct", dict(sub=VEC)), ("B", "struct", dict(sub=VEC)), ("ReturnValue", "struct", dict(sub=VEC, out=True))])
+    g.link(cur, sb["A"])
+    g.link(self_get(var, "struct", x - 150, y + 100, sub=VEC), sb["B"])
+    vs = lib_pure(KML, "KismetMathLibrary", "VSize", x + 150, y, [("A", "struct", dict(sub=VEC)), ("ReturnValue", "real", dict(subcat="double", out=True))])
+    g.link(sb["ReturnValue"], vs["A"])
+    dv = lib_pure(KML, "KismetMathLibrary", "Divide_DoubleDouble", x + 300, y,
+                  [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="1.0",')),
+                   ("ReturnValue", "real", dict(subcat="double", out=True))])
+    g.link(vs["ReturnValue"], dv["A"])
+    mx = lib_pure(KML, "KismetMathLibrary", "FMax", x + 300, y + 100,
+                  [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.001",')),
+                   ("ReturnValue", "real", dict(subcat="double", out=True))])
+    g.link(tick["DeltaSeconds"], mx["A"])
+    g.link(mx["ReturnValue"], dv["B"])
+    return dv["ReturnValue"]
+
+
+spd = lib_pure(KML, "KismetMathLibrary", "FMax", X3 + 1500, Y3 + 3700,
+               [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(speed(X3 + 1000, Y3 + 3600, HL, "PrevLH"), spd["A"])
+g.link(speed(X3 + 1000, Y3 + 3800, HR, "PrevRH"), spd["B"])
+fast = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X3 + 1700, Y3 + 3700,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="60.0",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(spd["ReturnValue"], fast["A"])
+last1 = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X3 + 1700, Y3 + 3850,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="1.0",')),
+                  ("ReturnValue", "bool", dict(out=True))])
+g.link(irem["ReturnValue"], last1["A"])
+fast_now = b_and(X3 + 1900, Y3 + 3750, b_and(X3 + 1850, Y3 + 3700, fast["ReturnValue"], last1["ReturnValue"]),
+                 b_and(X3 + 1850, Y3 + 3850, b_not(X3 + 1750, Y3 + 3950, known), b_and(X3 + 1750, Y3 + 4050, iok, iplay["ReturnValue"])))
+ftp = lib_pure(KML, "KismetMathLibrary", "Add_IntInt", X3 + 1900, Y3 + 3950,
+               [("A", "int", dict(extra='DefaultValue="0",')), ("B", "int", dict(extra='DefaultValue="1",')), ("ReturnValue", "int", dict(out=True))])
+g.link(self_get("FastTicks", "int", X3 + 1750, Y3 + 4150), ftp["A"])
+ftsel = lib_pure(KML, "KismetMathLibrary", "SelectInt", X3 + 2050, Y3 + 3900,
+                 [("A", "int", dict(extra='DefaultValue="0",')), ("B", "int", dict(extra='DefaultValue="0",')),
+                  ("bPickA", "bool", dict(extra='DefaultValue="false",')), ("ReturnValue", "int", dict(out=True))])
+g.link(ftp["ReturnValue"], ftsel["A"])
+g.link(fast_now, ftsel["bPickA"])
+reach_live = lib_pure(KML, "KismetMathLibrary", "GreaterEqual_IntInt", X3 + 1900, Y3 + 4250,
+                      [("A", "int", dict(extra='DefaultValue="0",')), ("B", "int", dict(extra='DefaultValue="2",')), ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("FastTicks", "int", X3 + 1750, Y3 + 4250), reach_live["A"])
+ending = b_and(X3 + 1700, Y3 + 1400, b_and(X3 + 1500, Y3 + 1700, iok, iplay["ReturnValue"]),
+               b_or(X3 + 1600, Y3 + 1500, ilast["ReturnValue"], reach_live["ReturnValue"]))   # build 77: no "Out" rule; build 80/82: live reach
 # build 60: the drink is stopped by the game (blends out, never reaches its own end): its blend-out showed the
 # stance's raised left hand before the rest pose came in. A stopped item montage ends the action too.
 stopped = b_and(X3 + 1500, Y3 + 1900, b_and(X3 + 1400, Y3 + 1950, iok, b_not(X3 + 1300, Y3 + 2000, iplay["ReturnValue"])),
@@ -1218,7 +1350,15 @@ g.link(self_get("LHMin", "real", X3 + 2000, Y3 - 1250, subcat="double"), lmn["B"
 slm = self_set("LHMin", "real", X3 + 2250, Y3 - 1150, "lowest left hand of this item", subcat="double")
 g.link(lmn["ReturnValue"], slm["LHMin"])
 g.link(lat["then"], slm["execute"])
-g.link(slm["then"], brn["execute"])
+sft2 = self_set("FastTicks", "int", X3 + 2300, Y3 - 1700, "fast hand ticks in the item's last second")
+g.link(ftsel["ReturnValue"], sft2["FastTicks"])
+spl = self_set("PrevLH", "struct", X3 + 2550, Y3 - 1700, "left hand (chest space)", sub=VEC)
+g.link(HL, spl["PrevLH"])
+spr = self_set("PrevRH", "struct", X3 + 2800, Y3 - 1700, "right hand (chest space)", sub=VEC)
+g.link(HR, spr["PrevRH"])
+g.link(slm["then"], sft2["execute"])
+chain(sft2, spl, spr)
+g.link(spr["then"], brn["execute"])
 sim2 = self_set("ItemMontage", "object", X3 + 2800, Y3 - 1000, "follow the newer item animation", sub=MONTCLS)
 g.link(cur_n, sim2["ItemMontage"])
 g.link(brn["then"], sim2["execute"])
@@ -1229,8 +1369,10 @@ sim = self_set("ItemMontage", "object", X3 + 2550, Y3 - 350, "the item animation
 g.link(cur_m, sim["ItemMontage"])
 lhr = self_set("LHMin", "real", X3 + 2450, Y3 - 550, "left hand: new item", subcat="double")
 g.link(LHZ, lhr["LHMin"])
-g.link(brf["then"], lhr["execute"])
-g.link(lhr["then"], sim["execute"])
+g.link(release(X3 + 2300, Y3 - 3000, brf["then"], "new item", False), lhr["execute"])
+ftz = self_set("FastTicks", "int", X3 + 2600, Y3 - 550, "new item: no fast ticks yet", default="0")
+g.link(lhr["then"], ftz["execute"])
+g.link(ftz["then"], sim["execute"])
 shw_f = hands_hidden(X3 + 2650, Y3 - 650, sim["then"], as_pc, "false", "item starts")
 pa1 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 - 200, "pose: free arms", default="true")
 # build 67: drinks get their own table (make_sit_drink.py): the left arm stays in the lap instead of lifting
@@ -1341,7 +1483,45 @@ cutq = member_call(ANIMI, "StopSlotAnimation", X3 + 2600, Y3 + 1900, anim, "cut 
     ("InBlendOutTime", "real", dict(subcat="float", extra='DefaultValue="0.050000",')),
     ("SlotNodeName", "name", dict(extra='DefaultValue="MainActionSlot",'))])
 g.link(brQ["then"], cutq["execute"])
-g.link(sqI["then_1"], brE["execute"])
+fzv = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 1500, Y3 + 3100, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("FrozenMontage", "object", X3 + 1350, Y3 + 3100, sub=MONTCLS), fzv["Object"])
+fzneg = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X3 + 1500, Y3 + 3200,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                  ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("FrozenT", "real", X3 + 1350, Y3 + 3200, subcat="double"), fzneg["A"])
+fzpos = member_pure(ANIMI, "Montage_GetPosition", X3 + 1300, Y3 + 3300, anim,
+                    [("Montage", "object", dict(sub=MONTCLS)), ("ReturnValue", "real", dict(subcat="float", out=True))])
+fzpos.pins["Montage"].const = True
+g.link(self_get("FrozenMontage", "object", X3 + 1150, Y3 + 3300, sub=MONTCLS), fzpos["Montage"])
+fzlen = member_pure(ANIMSEQB, "GetPlayLength", X3 + 1300, Y3 + 3400, self_get("FrozenMontage", "object", X3 + 1150, Y3 + 3400, sub=MONTCLS),
+                    [("ReturnValue", "real", dict(subcat="float", out=True))])
+fzrem = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X3 + 1500, Y3 + 3350,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                  ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(fzlen["ReturnValue"], fzrem["A"])
+g.link(fzpos["ReturnValue"], fzrem["B"])
+fzend = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X3 + 1650, Y3 + 3350,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.04",')),
+                  ("ReturnValue", "bool", dict(out=True))])
+g.link(fzrem["ReturnValue"], fzend["A"])
+brFZ = branch(X3 + 1800, Y3 + 3100, "item in its last frames, not held yet?",
+              b_and(X3 + 1750, Y3 + 3250, b_and(X3 + 1700, Y3 + 3200, fzv["ReturnValue"], fzneg["ReturnValue"]), fzend["ReturnValue"]))
+g.link(sqI["then_1"], brFZ["execute"])
+hold = member_call(ANIMI, "Montage_SetPlayRate", X3 + 2100, Y3 + 3100, anim, "hold the item's final pose (no stance swap under the blend)", [
+    ("Montage", "object", dict(sub=MONTCLS)), ("NewPlayRate", "real", dict(subcat="float", extra='DefaultValue="0.000100",'))])
+hold.pins["Montage"].const = True
+g.link(self_get("FrozenMontage", "object", X3 + 1950, Y3 + 3250, sub=MONTCLS), hold["Montage"])
+g.link(brFZ["then"], hold["execute"])
+hft = self_set("FrozenT", "real", X3 + 2400, Y3 + 3100, "held since", subcat="double")
+g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X3 + 2250, Y3 + 3250,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"], hft["FrozenT"])
+g.link(hold["then"], hft["execute"])
+sqFZ = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X3 + 2650, Y3 + 3100, "")
+sqFZ.pin("execute", "exec")
+sqFZ.pin("then_0", "exec", out=True)
+g.link(hft["then"], sqFZ["execute"])
+g.link(brFZ["else"], sqFZ["execute"])
+g.link(release(X3 + 1900, Y3 + 2400, sqFZ["then_0"], "rest pose in", True), brE["execute"])
 g.link(brE["then"], self_set("EndedMontage", "object", X3 + 2600, Y3 + 1500, "forget the ended item", sub=MONTCLS)["execute"])
 g.link(isq["then_1"], brr["execute"])
 brh = branch(X3 + 2550, Y3 + 200, "coming from free arms?", self_get("PoseAdditive", "bool", X3 + 2450, Y3 + 350))
@@ -1352,11 +1532,23 @@ g.link(brr["then"], brh["execute"])
 # ending" for the next item (probe, build 60: water from the backpack never got free arms, the rest-pose heal killed it)
 sen = self_set("EndedMontage", "object", X3 + 2450, Y3 - 100, "item done: remember it as ended", sub=MONTCLS)
 g.link(self_get("ItemMontage", "object", X3 + 2300, Y3 + 50, sub=MONTCLS), sen["EndedMontage"])
-g.link(brh["then"], sen["execute"])
+sfz = self_set("FrozenMontage", "object", X3 + 2450, Y3 - 400, "item to hold at its end", sub=MONTCLS)
+g.link(self_get("ItemMontage", "object", X3 + 2300, Y3 - 250, sub=MONTCLS), sfz["FrozenMontage"])
+g.link(brh["then"], sfz["execute"])
+frz = member_call(ANIMI, "Montage_SetPlayRate", X3 + 2200, Y3 - 700, anim, "hold the item before its reach", [
+    ("Montage", "object", dict(sub=MONTCLS)), ("NewPlayRate", "real", dict(subcat="float", extra='DefaultValue="0.000100",'))])
+frz.pins["Montage"].const = True
+g.link(self_get("ItemMontage", "object", X3 + 2050, Y3 - 550, sub=MONTCLS), frz["Montage"])
+g.link(sfz["then"], frz["execute"])
+sft = self_set("FrozenT", "real", X3 + 2700, Y3 - 400, "held since", subcat="double")
+g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X3 + 2550, Y3 - 250,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"], sft["FrozenT"])
+g.link(frz["then"], sft["execute"])
+g.link(sft["then"], sen["execute"])
 slw = self_set("ItemMontage", "object", X3 + 2600, Y3 - 100, "item done: forget it", sub=MONTCLS)
 g.link(sen["then"], slw["execute"])
 hid_r = hands_hidden(X3 + 2650, Y3 + 100, slw["then"], as_pc, "true", "item done")
-pr = play_rest_eased(X3 + 3300, Y3 + 200, "resting seated pose (arms settle, 1.0 s ease in-out)", hid_r, 1.0, "HermiteCubic")
+pr = play_rest_eased(X3 + 3300, Y3 + 200, "resting seated pose (arms settle, 0.55 s ease in-out)", hid_r, 0.55, "HermiteCubic")   # build 84: faster (tester)
 prh = play_rest(X3 + 2700, Y3 + 450, "resting pose lost: back at once", {"then": brh["else"]}, 0.01)
 hpa = self_set("PoseAdditive", "bool", X3 + 3350, Y3 + 450, "pose: resting (heal)", default="false")
 hdt = self_set("DrinkTable", "bool", X3 + 3200, Y3 + 600, "no drink table (heal)", default="false")
@@ -1365,8 +1557,11 @@ g.link(hdt["then"], hpa["execute"])
 g.link(hpa["then"], self_set("ItemMontage", "object", X3 + 3600, Y3 + 450, "no item (heal)", sub=MONTCLS)["execute"])
 pa2 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 + 200, "pose: resting", default="false")
 rwr = member_call(OBJC, "RemoveWeaponFromHands", X3 + 2850, Y3 + 400, as_pc, "weapon out of the hands again")
-g.link(pr["then"], rwr["execute"])
-g.link(rwr["then"], pa2["execute"])
+# build 83: no RemoveWeaponFromHands here. Probe (build 82): on the frame the resting pose started, the hips moved
+# 8 cm forward / 4 cm up and both hands ~30 cm forward and up in ONE frame, then eased into the lap: this call swaps
+# the game's arm/stance layer under our free-arms legs at once (the "hand reaches out" and the body jump). The
+# weapon the game draws after the item is still put away (rwe, "weapon just came out?") once the rest pose is in.
+g.link(pr["then"], pa2["execute"])
 g.link(pa2["then"], self_set("DrinkTable", "bool", X3 + 3250, Y3 + 300, "no drink table (rest)", default="false")["execute"])
 
 # ---- 4: pose frame from the view yaw ----
@@ -1563,7 +1758,10 @@ g.link(stp["ReturnValue"], eased["B"])
 follow = kml("SelectFloat", X4 + 1700, Y4 - 800, [dpin("A"), dpin("B"), ("bPickA", "bool", dict(extra='DefaultValue="false",')), RET])
 g.link(actor_yaw, follow["A"])
 g.link(eased["ReturnValue"], follow["B"])
-g.link(b_and(X4 + 1550, Y4 - 650, self_get("PoseAdditive", "bool", X4 + 1400, Y4 - 650),
+hv4 = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X4 + 1250, Y4 - 700, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("FrozenMontage", "object", X4 + 1100, Y4 - 700, sub=MONTCLS), hv4["Object"])
+# build 82: also while an item is held at its end with the camera still on the head (the view must not swing)
+g.link(b_and(X4 + 1550, Y4 - 650, b_or(X4 + 1450, Y4 - 700, self_get("PoseAdditive", "bool", X4 + 1400, Y4 - 650), hv4["ReturnValue"]),
              b_not(X4 + 1400, Y4 - 580, self_get("CamUnhooked", "bool", X4 + 1250, Y4 - 580))), follow["bPickA"])
 sby = self_set("BodyYaw", "real", X4 + 1900, Y4 - 1000, "body facing: eased", subcat="double")
 g.link(follow["ReturnValue"], sby["BodyYaw"])
@@ -1600,7 +1798,12 @@ g.link(hsh["then"], bral["execute"])
 cam4 = cam_of(X4 + 2100, Y4 + 150, as_pc)
 # not aligned: camera unhooked (once), pointed at the view every tick
 bru = branch(X4 + 2900, Y4 - 700, "camera still hooked?", b_not(X4 + 2800, Y4 - 550, self_get("CamUnhooked", "bool", X4 + 2650, Y4 - 550)))
-g.link(bral["else"], bru["execute"])
+hv = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X4 + 2700, Y4 - 950, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("FrozenMontage", "object", X4 + 2550, Y4 - 950, sub=MONTCLS), hv["Object"])
+brHold = branch(X4 + 2750, Y4 - 850, "item held? (camera stays on the head)",
+                b_and(X4 + 2700, Y4 - 1050, hv["ReturnValue"], b_not(X4 + 2600, Y4 - 1050, self_get("CamUnhooked", "bool", X4 + 2450, Y4 - 1050))))
+g.link(bral["else"], brHold["execute"])
+g.link(brHold["else"], bru["execute"])
 ucr = lib_pure(KML, "KismetMathLibrary", "BreakRotator", X4 + 3000, Y4 - 1300,
                [("InRot", "struct", dict(sub=ROT)), ("Roll", "real", dict(subcat="float", out=True)),
                 ("Pitch", "real", dict(subcat="float", out=True)), ("Yaw", "real", dict(subcat="float", out=True))])
@@ -1770,7 +1973,10 @@ pcl = lib_pure(GS, "GameplayStatics", "GetPlayerController", XS + 1550, YS - 110
 # build 55: no looking around while getting up (vanilla does not allow it either); reset when up
 ilk_s = member_call(cls("/Script/Engine.Controller"), "SetIgnoreLookInput", XS + 1650, YS - 1300, pcl, "no looking until up",
                     [("bNewLookInput", "bool", dict(extra='DefaultValue="true",'))])
-chain(st1, stp_s, dmv_s, ilk_s, st2)
+g.link(st1["then"], stp_s["execute"])
+g.link(stp_s["then"], dmv_s["execute"])
+g.link(dmv_s["then"], ilk_s["execute"])
+g.link(release(XS + 1800, YS - 2400, ilk_s["then"], "stand-up", False), st2["execute"])
 shw_s = hands_hidden(XS + 2600, YS - 700, rel_s["then"], sc["AsPC"], "false", "stand")
 chain(shw_s, show_s)
 chain(sa_s, ps, dl)
