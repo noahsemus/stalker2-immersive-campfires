@@ -35,6 +35,14 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   jitter gone, guitar seamless. Open: camera control lost for a moment when an item starts / ends, the separate
   shadow mesh still turns with the view (second shadow).
 
+- 2026-10-01 builds 37-77 (Noah: "best so far", checkpoint): camera free and smooth at rest and on stand-up (view eases
+  to level / body-forward, look locked while getting up, body does not turn), guitar hint gone (HUDContextualLegend
+  override, LegendText collapsed), Sleeping Bag Mod while seated = stand up + its hours popup (its Config's
+  "On Widget Init" by name; never touch its tick order: four crashes), full vanilla item animations, arms ease into
+  the lap only after the item's own animation (last 0.15 s), injector (LeftHand slot) counts as busy, the game's
+  weapon draw after items cut at once, pose tables start on the right frame. Open: the body jumps / shifts after an
+  item animation.
+
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
   Exclusive; W/A/S/D/Space/F/Esc = `IA_PlayerCAExit`). While any interaction is in progress native PDA / backpack /

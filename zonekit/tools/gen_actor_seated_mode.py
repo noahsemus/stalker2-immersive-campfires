@@ -274,6 +274,9 @@ def restore_limits(x, y, label, prev):
     return sets[-1]
 
 
+POSE_PLAYS = []   # build 71: (node, "rest" | "add"); their start time is linked to the right table frame at the end
+
+
 def play_additive(x, y, comment, prev, asset=None, blend_in=0.35):
     n = member_call(ANIMI, "PlaySlotAnimationAsDynamicMontage", x, y, anim, comment, [
         ("Asset", "object", dict(sub=ANIMSEQB, extra=f'DefaultObject="{asset or SIT_ADD}",')),
@@ -285,6 +288,7 @@ def play_additive(x, y, comment, prev, asset=None, blend_in=0.35):
         ("BlendOutTriggerTime", "real", dict(subcat="float", extra='DefaultValue="-1.000000",')),
         ("InTimeToStartMontageAt", "real", dict(subcat="float", extra='DefaultValue="0.000000",')),
         ("ReturnValue", "object", dict(sub=MONTCLS, out=True))])
+    POSE_PLAYS.append((n, "rest" if asset == SIT_REST else "add"))
     g.link(prev["then"], n["execute"])
     sv = self_set("PoseMontage", "object", x + 350, y, "", sub=MONTCLS)
     g.link(n["ReturnValue"], sv["PoseMontage"])
@@ -331,20 +335,24 @@ def cam_of(x, y, pc_pin):
     return member_pure(PC, "GetCameraComponent", x, y, pc_pin, [("ReturnValue", "object", dict(sub=cls("/Script/Engine.CameraComponent"), out=True))])["ReturnValue"]
 
 
-def body_release(x, y, pc_pin, prev, label):
-    """Mesh back under the actor, camera back on its bone (relative rotation saved at the takeover)."""
+def body_release(x, y, pc_pin, prev, label, keep_cam=False):
+    """Mesh back under the actor, camera back on its bone (relative rotation saved at the takeover).
+    keep_cam: only the mesh and the shadow (the stand-up keeps the camera unhooked until up)."""
     mesh_ = other_get(CHAR, "Mesh", "object", x, y + 300, pc_pin, sub=SKM)
     m = set_rot("K2_SetRelativeRotation", x + 200, y, mesh_, make_rot(x + 50, y + 450), f"body follows the actor again ({label})")
+    shd_ = other_get(PC, "ShadowMeshComponent", "object", x + 900, y + 300, pc_pin, sub=SKM)
+    sh = set_rot("K2_SetRelativeRotation", x + 1100, y, shd_,
+                 make_rot(x + 950, y + 450, yaw_pin=self_get("ShadowRelY", "real", x + 800, y + 550, subcat="double")), f"shadow follows the actor again ({label})")
+    g.link(prev["then"], m["execute"])
+    if keep_cam:
+        chain(m, sh)
+        return sh
     cam_ = cam_of(x + 300, y + 450, pc_pin)
     a = set_abs_rot(x + 500, y, cam_, "false", f"camera back on the head ({label})")
     cr = make_rot(x + 600, y + 450, self_get("CamRelP", "real", x + 450, y + 550, subcat="double"),
                   self_get("CamRelY", "real", x + 450, y + 650, subcat="double"))
     c = set_rot("K2_SetRelativeRotation", x + 800, y, cam_, cr, "")
-    shd_ = other_get(PC, "ShadowMeshComponent", "object", x + 900, y + 300, pc_pin, sub=SKM)
-    sh = set_rot("K2_SetRelativeRotation", x + 1100, y, shd_,
-                 make_rot(x + 950, y + 450, yaw_pin=self_get("ShadowRelY", "real", x + 800, y + 550, subcat="double")), f"shadow follows the actor again ({label})")
     hk = self_set("CamUnhooked", "bool", x + 1400, y, "camera hooked", default="false")
-    g.link(prev["then"], m["execute"])
     chain(m, a, c, sh, hk)
     return hk
 
@@ -358,7 +366,7 @@ def blend_args(x, y, seconds, option="HermiteCubic"):
     return n["AlphaBlendArgs"]
 
 
-def play_rest_eased(x, y, comment, prev, seconds):
+def play_rest_eased(x, y, comment, prev, seconds, option="ExpOut"):
     """Resting pose back in with an ease-in-out blend (arms settle into the lap with some weight)."""
     n = member_call(ANIMI, "PlaySlotAnimationAsDynamicMontage_WithBlendArgs", x, y, anim, comment, [
         ("Asset", "object", dict(sub=ANIMSEQB, extra=f'DefaultObject="{SIT_REST}",')),
@@ -373,7 +381,8 @@ def play_rest_eased(x, y, comment, prev, seconds):
     for pn in ("BlendIn", "BlendOut"):
         n.pins[pn].ref = True
         n.pins[pn].const = True
-    g.link(blend_args(x - 250, y + 350, seconds, "ExpOut"), n["BlendIn"])
+    POSE_PLAYS.append((n, "rest"))
+    g.link(blend_args(x - 250, y + 350, seconds, option), n["BlendIn"])
     g.link(blend_args(x - 250, y + 550, 0.25, "Linear"), n["BlendOut"])
     g.link(prev["then"], n["execute"])
     sv = self_set("PoseMontage", "object", x + 350, y, "", sub=MONTCLS)
@@ -426,6 +435,34 @@ def hands_hidden(x, y, prev_then, pc_pin, hidden, label):
     g.link(prev_then, nodes[0]["execute"])
     g.link(nodes[0]["then"], nodes[1]["execute"])
     return nodes[1]
+
+
+
+MHT = "\"/Script/CoreUObject.Enum'/Script/Stalker2.EMainHandEquipmentType'\""
+
+
+def bare_hands(x, y, pc_pin, prev_then, label):
+    """StandHand = the hand type if it is a weapon (not None); main hand -> None, no animation. Returns the last node."""
+    ht = member_pure(OBJC, "GetMainHandEquipType", x, y + 300, pc_pin, [("ReturnValue", "byte", dict(sub=HANDENUM, out=True))])["ReturnValue"]
+    nz = lib_pure(KML, "KismetMathLibrary", "NotEqual_ByteByte", x + 200, y + 300,
+                  [("A", "byte", dict(extra='DefaultValue="0",')), ("B", "byte", dict(extra='DefaultValue="0",')), ("ReturnValue", "bool", dict(out=True))])
+    g.link(ht, nz["A"])
+    br = branch(x + 200, y, f"a weapon in hand? ({label})", nz["ReturnValue"])
+    g.link(prev_then, br["execute"])
+    sv = self_set("StandHand", "byte", x + 450, y, f"weapon to give back on stand-up ({label})", sub=HANDENUM)
+    g.link(ht, sv["StandHand"])
+    g.link(br["then"], sv["execute"])
+    ch = member_call(OBJC, "ChangeMainHandWeapon", x + 700, y, pc_pin, f"bare hands ({label})", [
+        ("MainHandEquipment", "byte", dict(sub=MHT, extra='DefaultValue="None",')),
+        ("HideWeaponTimeLimit", "real", dict(subcat="float", extra='DefaultValue="0.000000",')),
+        ("bShouldSkipAnimation", "bool", dict(extra='DefaultValue="true",'))])
+    g.link(sv["then"], ch["execute"])
+    sq_ = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), x + 1000, y, "")
+    sq_.pin("execute", "exec")
+    sq_.pin("then_0", "exec", out=True)
+    g.link(ch["then"], sq_["execute"])
+    g.link(br["else"], sq_["execute"])
+    return {"then": sq_["then_0"]}
 
 
 def play_rest(x, y, comment, prev, blend_in=0.35):
@@ -611,7 +648,7 @@ tc = player_cast(300, 0, "tick", [tick["then"]])
 as_pc = tc["AsPC"]
 sq = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), 600, 0, "tick steps")
 sq.pin("execute", "exec")
-for k in range(9):
+for k in range(11):
     sq.pin(f"then_{k}", "exec", out=True)
 g.link(tc["then"], sq["execute"])
 
@@ -886,7 +923,16 @@ g.link(member_pure(ACTOR, "K2_GetActorLocation", X2 + 3450, Y2 - 600, as_pc, [("
 sby0 = self_set("BodyYaw", "real", X2 + 2500, Y2 - 450, "body facing = the seat", subcat="double")
 g.link(brk["Yaw"], sby0["BodyYaw"])
 keep_loc = set_actor_loc(X2 + 3850, Y2 - 800, as_pc, self_get("SeatLoc", "struct", X2 + 3700, Y2 - 600, sub=VEC), "stay on the seat spot")
-chain(save_t, save_y, stp_, sty_, sloc, rst, hide, fovr, inp, keep_loc, rwt, scp, scy, ssy, sby0, scr2, vh0, yaw_off)
+hh_t = lib_pure(KML, "KismetMathLibrary", "Add_DoubleDouble", X2 + 3900, Y2 - 1000,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="1.5",')),
+                 ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X2 + 3750, Y2 - 1100,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"], hh_t["A"])
+hh0 = self_set("HintHideUntil", "real", X2 + 4050, Y2 - 800, "hide the guitar hint a moment longer", subcat="double")
+g.link(hh_t["ReturnValue"], hh0["HintHideUntil"])
+chain(save_t, save_y, stp_, sty_, sloc, rst, hide)
+g.link(hide["then"], fovr["execute"])   # build 69: no bare-hands switch
+chain(fovr, inp, keep_loc, rwt, scp, scy, ssy, sby0, scr2, vh0, hh0, yaw_off)
 
 self_n = Node(g, BG + "K2Node_Self", nm("K2Node_Self"), X2 + 2000, Y2 + 300, "")
 self_n.pin("self", "object", subcat="self", out=True)
@@ -944,7 +990,9 @@ c3 = b_and(X3 - 200, Y3 + 200, self_get("SeatedMode", "bool", X3 - 400, Y3 + 160
            b_not(X3 - 400, Y3 + 260, self_get("Standing", "bool", X3 - 600, Y3 + 260)))
 br3 = branch(X3, Y3, "in seated mode?", c3)
 g.link(sq["then_3"], br3["execute"])
-dis = member_call(CMC, "DisableMovement", X3 + 300, Y3, move, "no walking")
+# build 55: back to DisableMovement (mode None). Build 49's walking mode was for the Sleeping Bag Mod, whose refusal
+# turned out to be its location check (step 9 handles the bag); in walking mode the body dropped during item animations.
+dis = member_call(CMC, "DisableMovement", X3 + 300, Y3, move, "no walking while seated")
 cm3 = cam_mgr(X3 + 560, Y3 + 300)
 lim = []
 seat_yaw = self_get("SeatYaw", "real", X3 + 700, Y3 + 420, subcat="double")
@@ -976,9 +1024,39 @@ h0 = lib_pure(KML, "KismetMathLibrary", "EqualEqual_ByteByte", X3 + 1600, Y3 + 7
               [("A", "byte", dict(extra='DefaultValue="0",')), ("B", "byte", dict(extra='DefaultValue="0",')),
                ("ReturnValue", "bool", dict(out=True))])
 g.link(hand3, h0["A"])
+cmb = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 1300, Y3 + 850, anim, [("ReturnValue", "object", dict(sub=MONTCLS, out=True))])["ReturnValue"]
+cmbn = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X3 + 1450, Y3 + 850,
+                [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(cmb, cmbn["Object"])
+cmbe = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 1600, Y3 + 850,
+                [("SearchIn", "string"), ("Substring", "string", dict(extra='DefaultValue="equip",')),
+                 ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(cmbn["ReturnValue"], cmbe["SearchIn"])
+cmbu = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 1600, Y3 + 950,
+                [("SearchIn", "string"), ("Substring", "string", dict(extra='DefaultValue="_use",')),
+                 ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(cmbn["ReturnValue"], cmbu["SearchIn"])
+# build 76: hands free OR an item animation (MG_fp_<item>_use) even with the weapon type kept, never a draw / holster
+imn = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X3 + 1450, Y3 + 1050,
+               [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(self_get("ItemMontage", "object", X3 + 1300, Y3 + 1050, sub=MONTCLS), imn["Object"])
+imu = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 1600, Y3 + 1050,
+               [("SearchIn", "string"), ("Substring", "string", dict(extra='DefaultValue="_use",')),
+                ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                ("ReturnValue", "bool", dict(out=True))])
+g.link(imn["ReturnValue"], imu["SearchIn"])
+q_lh = member_pure(ANIMI, "IsSlotActive", X3 + 1600, Y3 + 1150, anim,
+                   [("SlotNodeName", "name", dict(extra='DefaultValue="LeftHand",')), ("ReturnValue", "bool", dict(out=True))])["ReturnValue"]
+q_rh = member_pure(ANIMI, "IsSlotActive", X3 + 1600, Y3 + 1250, anim,
+                   [("SlotNodeName", "name", dict(extra='DefaultValue="RightHand",')), ("ReturnValue", "bool", dict(out=True))])["ReturnValue"]
+hand_slots_item = b_and(X3 + 1800, Y3 + 1200, b_or(X3 + 1750, Y3 + 1200, q_lh, q_rh), b_or(X3 + 1750, Y3 + 1100, cmbu["ReturnValue"], imu["ReturnValue"]))
+not_weapon_anim = b_and(X3 + 1800, Y3 + 850, b_or(X3 + 1750, Y3 + 900, h0["ReturnValue"], b_or(X3 + 1700, Y3 + 950, cmbu["ReturnValue"], imu["ReturnValue"])),
+                        b_not(X3 + 1750, Y3 + 800, cmbe["ReturnValue"]))
 busy = b_or(X3 + 2000, Y3 + 400, b_or(X3 + 1850, Y3 + 340, q_pda, q_bag),
-            b_and(X3 + 1900, Y3 + 700, h0["ReturnValue"],
-            b_or(X3 + 1850, Y3 + 500, q_act, b_or(X3 + 1750, Y3 + 580, q_def, q_up))))
+            b_and(X3 + 1900, Y3 + 700, not_weapon_anim,
+            b_or(X3 + 1850, Y3 + 500, b_or(X3 + 1800, Y3 + 450, q_act, hand_slots_item), b_or(X3 + 1750, Y3 + 580, q_def, q_up))))
 itm = self_get("ItemMontage", "object", X3 + 900, Y3 + 1300, sub=MONTCLS)
 iplay = member_pure(ANIMI, "Montage_IsPlaying", X3 + 1100, Y3 + 1300, anim, [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "bool", dict(out=True))])
 iplay.pins["Montage"].const = True
@@ -998,7 +1076,7 @@ irem = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X3 + 1300, Y3
 g.link(ilen["ReturnValue"], irem["A"])
 g.link(ipos["ReturnValue"], irem["B"])
 ilast = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X3 + 1500, Y3 + 1550,
-                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.5",')),
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.15",')),
                   ("ReturnValue", "bool", dict(out=True))])
 g.link(irem["ReturnValue"], ilast["A"])
 # build 45: Montage_IsPlaying(None) means "any montage playing" and a None length is 0: with no item captured yet
@@ -1011,7 +1089,72 @@ inot = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 900, Y3 
 g.link(itm, inot["A"])
 g.link(self_get("PoseMontage", "object", X3 + 700, Y3 + 1850, sub=MONTCLS), inot["B"])
 iok = b_and(X3 + 1100, Y3 + 1750, ival["ReturnValue"], inot["ReturnValue"])
-ending = b_and(X3 + 1700, Y3 + 1400, b_and(X3 + 1500, Y3 + 1700, iok, iplay["ReturnValue"]), b_or(X3 + 1600, Y3 + 1450, name_eq(X3 + 1400, Y3 + 1400, isec["ReturnValue"], "Out"), ilast["ReturnValue"]))
+ending = b_and(X3 + 1700, Y3 + 1400, b_and(X3 + 1500, Y3 + 1700, iok, iplay["ReturnValue"]), ilast["ReturnValue"])   # build 77: no "Out" rule
+# build 60: the drink is stopped by the game (blends out, never reaches its own end): its blend-out showed the
+# stance's raised left hand before the rest pose came in. A stopped item montage ends the action too.
+stopped = b_and(X3 + 1500, Y3 + 1900, b_and(X3 + 1400, Y3 + 1950, iok, b_not(X3 + 1300, Y3 + 2000, iplay["ReturnValue"])),
+                b_not(X3 + 1400, Y3 + 2050, b_or(X3 + 1300, Y3 + 2100, q_pda, q_bag)))
+# build 61: one-handed drinks end as the free left hand starts rising back to the weapon grip (probe, build 60: the
+# energy drink lifts it 27 cm from 45% of the animation on; that was the "pop", not the montage's blend-out)
+nm_it = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X3 + 900, Y3 + 2300,
+                 [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(itm, nm_it["Object"])
+drink = None
+for k, word in enumerate(("energy_drink", "water", "vodka", "beer")):
+    cn = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 1100, Y3 + 2300 + 100 * k,
+                  [("SearchIn", "string"), ("Substring", "string", dict(extra=f'DefaultValue="{word}",')),
+                   ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                   ("ReturnValue", "bool", dict(out=True))])
+    g.link(nm_it["ReturnValue"], cn["SearchIn"])
+    drink = cn["ReturnValue"] if drink is None else b_or(X3 + 1300, Y3 + 2300 + 100 * k, drink, cn["ReturnValue"])
+lh_loc = member_pure(SKM, "GetSocketLocation", X3 + 700, Y3 + 2700, mesh,
+                     [("InSocketName", "name", dict(extra='DefaultValue="jnt_l_hand",')), ("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"]
+lhb = lib_pure(KML, "KismetMathLibrary", "BreakVector", X3 + 900, Y3 + 2700,
+               [("InVec", "struct", dict(sub=VEC)), ("X", "real", dict(subcat="double", out=True)), ("Y", "real", dict(subcat="double", out=True)),
+                ("Z", "real", dict(subcat="double", out=True))])
+g.link(lh_loc, lhb["InVec"])
+acb = lib_pure(KML, "KismetMathLibrary", "BreakVector", X3 + 900, Y3 + 2850,
+               [("InVec", "struct", dict(sub=VEC)), ("X", "real", dict(subcat="double", out=True)), ("Y", "real", dict(subcat="double", out=True)),
+                ("Z", "real", dict(subcat="double", out=True))])
+g.link(member_pure(ACTOR, "K2_GetActorLocation", X3 + 700, Y3 + 2850, as_pc, [("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"], acb["InVec"])
+lhz = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X3 + 1100, Y3 + 2750,
+               [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(lhb["Z"], lhz["A"])
+g.link(acb["Z"], lhz["B"])
+LHZ = lhz["ReturnValue"]
+lmin8 = lib_pure(KML, "KismetMathLibrary", "Add_DoubleDouble", X3 + 1100, Y3 + 2900,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="8.0",')),
+                  ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(self_get("LHMin", "real", X3 + 900, Y3 + 3000, subcat="double"), lmin8["A"])
+rise = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X3 + 1300, Y3 + 2800,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(LHZ, rise["A"])
+g.link(lmin8["ReturnValue"], rise["B"])
+frac = lib_pure(KML, "KismetMathLibrary", "Divide_DoubleDouble", X3 + 1300, Y3 + 1650,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="1.0",')),
+                 ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(ipos["ReturnValue"], frac["A"])
+g.link(ilen["ReturnValue"], frac["B"])
+late = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X3 + 1500, Y3 + 1650,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.4",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(frac["ReturnValue"], late["A"])
+drink_end_pre = b_and(X3 + 1600, Y3 + 2700, b_and(X3 + 1500, Y3 + 2650, b_and(X3 + 1400, Y3 + 2600, iok, iplay["ReturnValue"]), drink),
+                      late["ReturnValue"])
+drink_end = b_and(X3 + 1600, Y3 + 2500, b_and(X3 + 1500, Y3 + 2450, b_and(X3 + 1400, Y3 + 2400, iok, iplay["ReturnValue"]), drink),
+                  b_and(X3 + 1500, Y3 + 2600, late["ReturnValue"], rise["ReturnValue"]))
+# build 62: an item we already ended stays ended while its animation still runs (build 61 re-entered free arms every
+# other tick after a drink ended early: the body bobbed and the drink jittered)
+endm = self_get("EndedMontage", "object", X3 + 1300, Y3 + 3100, sub=MONTCLS)
+eact = member_pure(ANIMI, "Montage_IsActive", X3 + 1500, Y3 + 3100, anim, [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "bool", dict(out=True))])
+eact.pins["Montage"].const = True
+g.link(endm, eact["Montage"])
+evld = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 1500, Y3 + 3200, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(endm, evld["Object"])
+still_ended = b_and(X3 + 1700, Y3 + 3150, evld["ReturnValue"], eact["ReturnValue"])
+ending = b_or(X3 + 1750, Y3 + 1500, b_or(X3 + 1650, Y3 + 1600, ending, stopped), still_ended)   # build 64: drink_end only locks the left arm
 busy = b_and(X3 + 1850, Y3 + 1200, busy, b_not(X3 + 1800, Y3 + 1300, ending))
 brb = branch(X3 + 1800, Y3, "arms busy? (item not in its last 0.5 s)", busy)
 hsq = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X3 + 1500, Y3 - 400, "weapon re-equipped?")
@@ -1049,15 +1192,71 @@ lat = self_set("LastActionTime", "real", X3 + 2100, Y3 - 200, "arms busy now", s
 g.link(now3["ReturnValue"], lat["LastActionTime"])
 g.link(brb["then"], lat["execute"])
 brf = branch(X3 + 2400, Y3 - 200, "resting pose on?", b_not(X3 + 2300, Y3 - 50, self_get("PoseAdditive", "bool", X3 + 2200, Y3 - 50)))
-g.link(lat["then"], brf["execute"])
+cur_n = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 2100, Y3 - 900, anim, [("ReturnValue", "object", dict(sub=MONTCLS, out=True))])["ReturnValue"]
+nv = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 2300, Y3 - 950, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(cur_n, nv["Object"])
+ne1 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 2300, Y3 - 850,
+               [("A", "object", dict(sub=OBJ)), ("B", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(cur_n, ne1["A"])
+g.link(self_get("PoseMontage", "object", X3 + 2100, Y3 - 800, sub=MONTCLS), ne1["B"])
+ne2 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 2300, Y3 - 750,
+               [("A", "object", dict(sub=OBJ)), ("B", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(cur_n, ne2["A"])
+g.link(self_get("ItemMontage", "object", X3 + 2100, Y3 - 700, sub=MONTCLS), ne2["B"])
+ne3 = lib_pure(KML, "KismetMathLibrary", "NotEqual_ObjectObject", X3 + 2300, Y3 - 650,
+               [("A", "object", dict(sub=OBJ)), ("B", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(cur_n, ne3["A"])
+g.link(self_get("LHMontage", "object", X3 + 2100, Y3 - 600, sub=MONTCLS), ne3["B"])
+brn = branch(X3 + 2500, Y3 - 1000, "newer item animation? (free arms on)",
+             b_and(X3 + 2450, Y3 - 800, b_and(X3 + 2400, Y3 - 850, nv["ReturnValue"], b_and(X3 + 2350, Y3 - 900, ne1["ReturnValue"], ne3["ReturnValue"])),
+                   b_and(X3 + 2350, Y3 - 700, ne2["ReturnValue"], self_get("PoseAdditive", "bool", X3 + 2200, Y3 - 650))))
+lmn = lib_pure(KML, "KismetMathLibrary", "FMin", X3 + 2200, Y3 - 1300,
+               [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(LHZ, lmn["A"])
+g.link(self_get("LHMin", "real", X3 + 2000, Y3 - 1250, subcat="double"), lmn["B"])
+slm = self_set("LHMin", "real", X3 + 2250, Y3 - 1150, "lowest left hand of this item", subcat="double")
+g.link(lmn["ReturnValue"], slm["LHMin"])
+g.link(lat["then"], slm["execute"])
+g.link(slm["then"], brn["execute"])
+sim2 = self_set("ItemMontage", "object", X3 + 2800, Y3 - 1000, "follow the newer item animation", sub=MONTCLS)
+g.link(cur_n, sim2["ItemMontage"])
+g.link(brn["then"], sim2["execute"])
+g.link(sim2["then"], brf["execute"])
+g.link(brn["else"], brf["execute"])
 cur_m = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 2450, Y3 - 450, anim, [("ReturnValue", "object", dict(sub=MONTCLS, out=True))])["ReturnValue"]
 sim = self_set("ItemMontage", "object", X3 + 2550, Y3 - 350, "the item animation", sub=MONTCLS)
 g.link(cur_m, sim["ItemMontage"])
-g.link(brf["then"], sim["execute"])
+lhr = self_set("LHMin", "real", X3 + 2450, Y3 - 550, "left hand: new item", subcat="double")
+g.link(LHZ, lhr["LHMin"])
+g.link(brf["then"], lhr["execute"])
+g.link(lhr["then"], sim["execute"])
 shw_f = hands_hidden(X3 + 2650, Y3 - 650, sim["then"], as_pc, "false", "item starts")
-paf = play_additive(X3 + 3300, Y3 - 200, "free arms (additive legs)", shw_f, None, 0.1)
 pa1 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 - 200, "pose: free arms", default="true")
-g.link(paf["then"], pa1["execute"])
+# build 67: drinks get their own table (make_sit_drink.py): the left arm stays in the lap instead of lifting
+DRINK_TABLES = []   # build 69: off (see make_sit_drink.py); was energy_drink, water, vodka, beer
+nm_d = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X3 + 3000, Y3 - 2300,
+                [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(self_get("ItemMontage", "object", X3 + 2850, Y3 - 2300, sub=MONTCLS), nm_d["Object"])
+prev_else = shw_f["then"]
+for k, (word, short) in enumerate(DRINK_TABLES):
+    cn = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 3200, Y3 - 2300 + 120 * k,
+                  [("SearchIn", "string"), ("Substring", "string", dict(extra=f'DefaultValue="{word}",')),
+                   ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                   ("ReturnValue", "bool", dict(out=True))])
+    g.link(nm_d["ReturnValue"], cn["SearchIn"])
+    bd = branch(X3 + 3400, Y3 - 2300 + 250 * k, f"a {word}?", cn["ReturnValue"])
+    g.link(prev_else, bd["execute"])
+    asset = f"/ImmersiveCampfires/Runtime/AS_ImmCamp_SitDrink_{short}.AS_ImmCamp_SitDrink_{short}"
+    pd = play_additive(X3 + 3700, Y3 - 2300 + 250 * k, f"free arms: seated {word}", {"then": bd["then"]}, asset, 0.1)
+    sdt = self_set("DrinkTable", "bool", X3 + 4500, Y3 - 2300 + 250 * k, "drink table on", default="true")
+    g.link(pd["then"], sdt["execute"])
+    g.link(sdt["then"], pa1["execute"])
+    prev_else = bd["else"]
+paf = play_additive(X3 + 3300, Y3 - 200, "free arms (additive legs)", {"then": prev_else}, None, 0.1)
+sdf = self_set("DrinkTable", "bool", X3 + 3650, Y3 - 350, "no drink table", default="false")
+g.link(paf["then"], sdf["execute"])
+g.link(sdf["then"], pa1["execute"])
 par1 = self_set("PoseAR", "bool", X3 + 3250, Y3 - 200, "free arms on the item stance", default="true")
 g.link(pa1["then"], par1["execute"])
 # idle: back to resting 0.4 s after the last busy tick; also heal a lost resting pose
@@ -1106,17 +1305,69 @@ g.link(brw["then"], away["execute"])
 lpa = self_set("LastPutAway", "real", X3 + 3000, Y3 + 950, "tried just now", subcat="double")
 g.link(now3["ReturnValue"], lpa["LastPutAway"])
 g.link(away["then"], lpa["execute"])
+# build 68: "ended" is about one PLAY of the item: EndedMontage is the montage asset, and the next use of the same
+# item plays the same asset, so it read as already ended (second drink / second backpack: no free arms). Forget it
+# as soon as that play is over.
+eact2 = member_pure(ANIMI, "Montage_IsActive", X3 + 2100, Y3 + 1650, anim, [("Montage", "object", dict(sub=MONT)), ("ReturnValue", "bool", dict(out=True))])
+eact2.pins["Montage"].const = True
+g.link(self_get("EndedMontage", "object", X3 + 1900, Y3 + 1650, sub=MONTCLS), eact2["Montage"])
+evl2 = lib_pure(KSL, "KismetSystemLibrary", "IsValid", X3 + 2100, Y3 + 1750, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("EndedMontage", "object", X3 + 1900, Y3 + 1750, sub=MONTCLS), evl2["Object"])
+brE = branch(X3 + 2300, Y3 + 1500, "ended item's play over?", b_and(X3 + 2250, Y3 + 1700, evl2["ReturnValue"], b_not(X3 + 2200, Y3 + 1800, eact2["ReturnValue"])))
+eqm = member_pure(ANIMI, "GetCurrentActiveMontage", X3 + 1700, Y3 + 2000, anim, [("ReturnValue", "object", dict(sub=MONTCLS, out=True))])["ReturnValue"]
+eqn = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X3 + 1900, Y3 + 2000,
+               [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(eqm, eqn["Object"])
+eqc = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 2100, Y3 + 2000,
+               [("SearchIn", "string"), ("Substring", "string", dict(extra='DefaultValue="equip",')),
+                ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                ("ReturnValue", "bool", dict(out=True))])
+g.link(eqn["ReturnValue"], eqc["SearchIn"])
+sqI = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X3 + 2150, Y3 + 1350, "idle checks")
+sqI.pin("execute", "exec")
+sqI.pin("then_0", "exec", out=True)
+sqI.pin("then_1", "exec", out=True)
+g.link(isq["then_0"], sqI["execute"])
+# build 74: only the weapon DRAW the game plays after an item; never an unequip (two-handed items like the
+# antirad injector first take the left hand off the weapon with an unequip montage; cutting it cancelled the item)
+equn = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "Contains", X3 + 2100, Y3 + 2150,
+                [("SearchIn", "string"), ("Substring", "string", dict(extra='DefaultValue="unequip",')),
+                 ("bUseCase", "bool", dict(extra='DefaultValue="false",')), ("bSearchFromEnd", "bool", dict(extra='DefaultValue="false",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(eqn["ReturnValue"], equn["SearchIn"])
+brQ = branch(X3 + 2300, Y3 + 1900, "the game's weapon draw? (not an unequip)", b_and(X3 + 2250, Y3 + 2100, eqc["ReturnValue"], b_not(X3 + 2200, Y3 + 2200, equn["ReturnValue"])))
+g.link(sqI["then_0"], brQ["execute"])
+cutq = member_call(ANIMI, "StopSlotAnimation", X3 + 2600, Y3 + 1900, anim, "cut it at once (arms resting)", [
+    ("InBlendOutTime", "real", dict(subcat="float", extra='DefaultValue="0.050000",')),
+    ("SlotNodeName", "name", dict(extra='DefaultValue="MainActionSlot",'))])
+g.link(brQ["then"], cutq["execute"])
+g.link(sqI["then_1"], brE["execute"])
+g.link(brE["then"], self_set("EndedMontage", "object", X3 + 2600, Y3 + 1500, "forget the ended item", sub=MONTCLS)["execute"])
 g.link(isq["then_1"], brr["execute"])
 brh = branch(X3 + 2550, Y3 + 200, "coming from free arms?", self_get("PoseAdditive", "bool", X3 + 2450, Y3 + 350))
 g.link(brr["then"], brh["execute"])
-hid_r = hands_hidden(X3 + 2650, Y3 + 100, brh["then"], as_pc, "true", "item done")
-pr = play_rest_eased(X3 + 3300, Y3 + 200, "resting seated pose (arms settle, 1.5 s)", hid_r, 1.5)
+# build 59: the item's last part slowed to a quarter as the arms settle: the drink's ending lifts the free left hand
+# back toward the weapon grip, which showed through the start of the rest blend ("hand pops up, then down")
+# build 61: the item is forgotten when the arms go back to rest: a stale ItemMontage that had stopped read as "item
+# ending" for the next item (probe, build 60: water from the backpack never got free arms, the rest-pose heal killed it)
+sen = self_set("EndedMontage", "object", X3 + 2450, Y3 - 100, "item done: remember it as ended", sub=MONTCLS)
+g.link(self_get("ItemMontage", "object", X3 + 2300, Y3 + 50, sub=MONTCLS), sen["EndedMontage"])
+g.link(brh["then"], sen["execute"])
+slw = self_set("ItemMontage", "object", X3 + 2600, Y3 - 100, "item done: forget it", sub=MONTCLS)
+g.link(sen["then"], slw["execute"])
+hid_r = hands_hidden(X3 + 2650, Y3 + 100, slw["then"], as_pc, "true", "item done")
+pr = play_rest_eased(X3 + 3300, Y3 + 200, "resting seated pose (arms settle, 1.0 s ease in-out)", hid_r, 1.0, "HermiteCubic")
 prh = play_rest(X3 + 2700, Y3 + 450, "resting pose lost: back at once", {"then": brh["else"]}, 0.01)
-g.link(prh["then"], self_set("PoseAdditive", "bool", X3 + 3350, Y3 + 450, "pose: resting (heal)", default="false")["execute"])
+hpa = self_set("PoseAdditive", "bool", X3 + 3350, Y3 + 450, "pose: resting (heal)", default="false")
+hdt = self_set("DrinkTable", "bool", X3 + 3200, Y3 + 600, "no drink table (heal)", default="false")
+g.link(prh["then"], hdt["execute"])
+g.link(hdt["then"], hpa["execute"])
+g.link(hpa["then"], self_set("ItemMontage", "object", X3 + 3600, Y3 + 450, "no item (heal)", sub=MONTCLS)["execute"])
 pa2 = self_set("PoseAdditive", "bool", X3 + 3000, Y3 + 200, "pose: resting", default="false")
 rwr = member_call(OBJC, "RemoveWeaponFromHands", X3 + 2850, Y3 + 400, as_pc, "weapon out of the hands again")
 g.link(pr["then"], rwr["execute"])
 g.link(rwr["then"], pa2["execute"])
+g.link(pa2["then"], self_set("DrinkTable", "bool", X3 + 3250, Y3 + 300, "no drink table (rest)", default="false")["execute"])
 
 # ---- 4: pose frame from the view yaw ----
 X4, Y4 = 1200, 4600 + 1400
@@ -1196,7 +1447,28 @@ rpos = kml("Add_DoubleDouble", X4 + 1900, Y4 + 900, [dpin("A"), dpin("B"), RET])
 g.link(yrow["ReturnValue"], rpos["A"])
 g.link(pmap["ReturnValue"], rpos["B"])
 selp = kml("SelectFloat", X4 + 2100, Y4 + 600, [dpin("A"), dpin("B"), ("bPickA", "bool", dict(extra='DefaultValue="false",')), RET])
-g.link(mrc["ReturnValue"], selp["A"])
+dpos = member_pure(ANIMI, "Montage_GetPosition", X4 + 1300, Y4 + 1600, anim,
+                   [("Montage", "object", dict(sub=MONTCLS)), ("ReturnValue", "real", dict(subcat="float", out=True))])
+dpos.pins["Montage"].const = True
+g.link(self_get("ItemMontage", "object", X4 + 1100, Y4 + 1650, sub=MONTCLS), dpos["Montage"])
+d30 = kml("Multiply_DoubleDouble", X4 + 1500, Y4 + 1600, [dpin("A"), dpin("B", "30.0"), RET])
+g.link(dpos["ReturnValue"], d30["A"])
+dfl = kml("Subtract_DoubleDouble", X4 + 1650, Y4 + 1600, [dpin("A"), dpin("B", "0.49"), RET])
+g.link(d30["ReturnValue"], dfl["A"])
+drow = kml("GridSnap_Float", X4 + 1800, Y4 + 1600, [dpin("Location"), dpin("GridSize", "1.0"), RET])
+g.link(dfl["ReturnValue"], drow["Location"])
+dcl = kml("FMax", X4 + 1950, Y4 + 1600, [dpin("A"), dpin("B", "0.0"), RET])
+g.link(drow["ReturnValue"], dcl["A"])
+drs = kml("Multiply_DoubleDouble", X4 + 2100, Y4 + 1600, [dpin("A"), dpin("B", "1.033333333"), RET])
+g.link(dcl["ReturnValue"], drs["A"])
+dsum = kml("Add_DoubleDouble", X4 + 2250, Y4 + 1600, [dpin("A"), dpin("B"), RET])
+g.link(drs["ReturnValue"], dsum["A"])
+g.link(mrc["ReturnValue"], dsum["B"])
+seld = kml("SelectFloat", X4 + 2400, Y4 + 1500, [dpin("A"), dpin("B"), ("bPickA", "bool", dict(extra='DefaultValue="false",')), RET])
+g.link(dsum["ReturnValue"], seld["A"])
+g.link(mrc["ReturnValue"], seld["B"])
+g.link(self_get("DrinkTable", "bool", X4 + 2250, Y4 + 1750), seld["bPickA"])
+g.link(seld["ReturnValue"], selp["A"])
 g.link(rpos["ReturnValue"], selp["B"])
 g.link(self_get("PoseAdditive", "bool", X4 + 1900, Y4 + 700), selp["bPickA"])
 setpos = member_call(ANIMI, "Montage_SetPosition", X4 + 1400, Y4, anim, "frame = view yaw", [
@@ -1223,7 +1495,8 @@ neq_st = lib_pure(KML, "KismetMathLibrary", "NotEqual_BoolBool", X4 - 150, Y4 - 
 g.link(stance_ar, neq_st["A"])
 g.link(self_get("PoseAR", "bool", X4 - 300, Y4 - 1300), neq_st["B"])
 brst = branch(X4 + 50, Y4 - 1400, "free arms on the wrong stance?",
-              b_and(X4, Y4 - 1250, self_get("PoseAdditive", "bool", X4 - 150, Y4 - 1250), neq_st["ReturnValue"]))
+              b_and(X4, Y4 - 1250, b_and(X4 - 50, Y4 - 1200, self_get("PoseAdditive", "bool", X4 - 150, Y4 - 1250),
+                                         b_not(X4 - 150, Y4 - 1150, self_get("DrinkTable", "bool", X4 - 300, Y4 - 1150))), neq_st["ReturnValue"]))
 sti = self_set("StanceTicks", "int", X4 + 350, Y4 - 1600, "wrong stance: one more tick")
 sti_add = lib_pure(KML, "KismetMathLibrary", "Add_IntInt", X4 + 200, Y4 - 1750,
                    [("A", "int", dict(extra='DefaultValue="0",')), ("B", "int", dict(extra='DefaultValue="1",')), ("ReturnValue", "int", dict(out=True))])
@@ -1252,6 +1525,8 @@ g.link(p_ar["then"], s_ar["execute"])
 g.link(p_bh["then"], s_ar["execute"])
 g.link(s_ar["then"], c4c["execute"])
 # (brst else -> stance matches -> c4c, above)
+# (step 9, hiding the vanilla guitar hint widgets, removed in build 51: it did not hide the hint)
+
 # ---- 8: remember where the actor is, for the "still?" test of the next tick ----
 sll = self_set("LastLoc", "struct", 400, 12000, "position this tick", sub=VEC)
 g.link(member_pure(ACTOR, "K2_GetActorLocation", 250, 12200, as_pc, [("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"], sll["LastLoc"])
@@ -1326,12 +1601,54 @@ cam4 = cam_of(X4 + 2100, Y4 + 150, as_pc)
 # not aligned: camera unhooked (once), pointed at the view every tick
 bru = branch(X4 + 2900, Y4 - 700, "camera still hooked?", b_not(X4 + 2800, Y4 - 550, self_get("CamUnhooked", "bool", X4 + 2650, Y4 - 550)))
 g.link(bral["else"], bru["execute"])
+ucr = lib_pure(KML, "KismetMathLibrary", "BreakRotator", X4 + 3000, Y4 - 1300,
+               [("InRot", "struct", dict(sub=ROT)), ("Roll", "real", dict(subcat="float", out=True)),
+                ("Pitch", "real", dict(subcat="float", out=True)), ("Yaw", "real", dict(subcat="float", out=True))])
+g.link(member_pure(SC_, "K2_GetComponentRotation", X4 + 2800, Y4 - 1300, cam4, [("ReturnValue", "struct", dict(sub=ROT, out=True))])["ReturnValue"], ucr["InRot"])
+uP = self_set("UnhookP", "real", X4 + 3000, Y4 - 1050, "camera pitch as it leaves the head", subcat="double")
+g.link(ucr["Pitch"], uP["UnhookP"])
+uY = self_set("UnhookY", "real", X4 + 3250, Y4 - 1050, "camera yaw as it leaves the head", subcat="double")
+g.link(ucr["Yaw"], uY["UnhookY"])
+unow = lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X4 + 3300, Y4 - 1200,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])
+uT = self_set("UnhookT", "real", X4 + 3500, Y4 - 1050, "when", subcat="double")
+g.link(unow["ReturnValue"], uT["UnhookT"])
+g.link(bru["then"], uP["execute"])
+chain(uP, uY, uT)
 unh = set_abs_rot(X4 + 3200, Y4 - 700, cam4, "true", "camera unhooked from the body (once)")
-g.link(bru["then"], unh["execute"])
+g.link(uT["then"], unh["execute"])
 unf = self_set("CamUnhooked", "bool", X4 + 3500, Y4 - 700, "camera unhooked", default="true")
 g.link(unh["then"], unf["execute"])
-view = set_rot("K2_SetWorldRotation", X4 + 3800, Y4 - 350, cam4,
-               make_rot(X4 + 3650, Y4 - 500, pitch_pin=pna["ReturnValue"], yaw_pin=actor_yaw), "camera = the view")
+el4 = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X4 + 3300, Y4 - 250,
+               [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X4 + 3100, Y4 - 250,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"], el4["A"])
+g.link(self_get("UnhookT", "real", X4 + 3100, Y4 - 150, subcat="double"), el4["B"])
+fr4 = lib_pure(KML, "KismetMathLibrary", "Divide_DoubleDouble", X4 + 3450, Y4 - 250,
+               [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.6",')),
+                ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(el4["ReturnValue"], fr4["A"])
+cl4 = lib_pure(KML, "KismetMathLibrary", "FClamp", X4 + 3600, Y4 - 250,
+               [("Value", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("Min", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                ("Max", "real", dict(subcat="double", extra='DefaultValue="1.0",')), ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(fr4["ReturnValue"], cl4["Value"])
+ea4 = lib_pure(KML, "KismetMathLibrary", "FInterpEaseInOut", X4 + 3750, Y4 - 250,
+               [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="1.0",')),
+                ("Alpha", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                ("Exponent", "real", dict(subcat="double", extra='DefaultValue="2.0",')),
+                ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(cl4["ReturnValue"], ea4["Alpha"])
+rl4 = lib_pure(KML, "KismetMathLibrary", "RLerp", X4 + 3900, Y4 - 250,
+               [("A", "struct", dict(sub=ROT)), ("B", "struct", dict(sub=ROT)),
+                ("Alpha", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
+                ("bShortestPath", "bool", dict(extra='DefaultValue="true",')),
+                ("ReturnValue", "struct", dict(sub=ROT, out=True))])
+g.link(make_rot(X4 + 3700, Y4 - 100, pitch_pin=self_get("UnhookP", "real", X4 + 3550, Y4 - 50, subcat="double"),
+                yaw_pin=self_get("UnhookY", "real", X4 + 3550, Y4 + 50, subcat="double")), rl4["A"])
+g.link(make_rot(X4 + 3650, Y4 - 500, pitch_pin=pna["ReturnValue"], yaw_pin=actor_yaw), rl4["B"])
+g.link(ea4["ReturnValue"], rl4["Alpha"])
+view = set_rot("K2_SetWorldRotation", X4 + 3800, Y4 - 350, cam4, rl4["ReturnValue"], "camera = the view (eased in after leaving the head)")
 vhq = kml("Greater_IntInt", X4 + 3500, Y4 - 950, [("A", "int", dict(extra='DefaultValue="0",')), ("B", "int", dict(extra='DefaultValue="0",')),
                                                  ("ReturnValue", "bool", dict(out=True))])
 g.link(self_get("ViewHold", "int", X4 + 3350, Y4 - 950), vhq["A"])
@@ -1389,7 +1706,7 @@ brs = branch(XS + 800, YS, "seated? (stand)", cs)
 g.link(sc["then"], brs["execute"])
 st1 = self_set("Standing", "bool", XS + 1100, YS, "standing: on", default="true")
 st2 = self_set("SeatedMode", "bool", XS + 1350, YS, "seated mode: off", default="false")
-yaw_on = set_yaw_follow(XS + 1600, YS, sc["AsPC"], "true", "body follows mouse again")
+yaw_on = set_yaw_follow(XS + 10800, YS + 1200, sc["AsPC"], "true", "body follows mouse again (up)")
 anim_s = member_pure(SKM, "GetAnimInstance", XS + 1700, YS + 450, other_get(CHAR, "Mesh", "object", XS + 1500, YS + 450, sc["AsPC"], sub=SKM),
                      [("ReturnValue", "object", dict(sub=ANIMI, out=True))])["ReturnValue"]
 ps = play_sit(XS + 5300, YS, sc["AsPC"], "Out", "stand-up animation")
@@ -1405,12 +1722,57 @@ mvs = member_call(CMC, "SetMovementMode", XS + 9800, YS, other_get(CHAR, "Charac
                   "walking again", [("NewMovementMode", "byte", dict(sub=MOVEMODE, extra='DefaultValue="MOVE_Walking",')),
                                     ("NewCustomMode", "byte", dict(extra='DefaultValue="0",'))])
 g.link(brs["then"], st1["execute"])
-sa_s = stop_additive(XS + 1900, YS + 250, "seated pose off", yaw_on, other_get(CHAR, "Mesh", "object", XS + 1600, YS + 500, sc["AsPC"], sub=SKM) if False else anim_s)
 show_s = member_call(PC, "EnableInteractions", XS + 1350, YS + 250, sc["AsPC"], "interaction prompts back")
-rel_s = body_release(XS + 1100, YS - 700, sc["AsPC"], st2, "stand")
-chain(st1, st2)
+sa_s = stop_additive(XS + 1900, YS + 250, "seated pose off", show_s, other_get(CHAR, "Mesh", "object", XS + 1600, YS + 500, sc["AsPC"], sub=SKM) if False else anim_s)
+# build 57: the body does not turn on stand-up: the actor turns to where the body faces (BodyYaw) before the mesh
+# follows it again; the camera stays ours (absolute) and eases from the seated view to level / body-forward (tick
+# step 10), hooked back when up
+cam_st = cam_of(XS + 1500, YS - 1700, sc["AsPC"])
+cvr = lib_pure(KML, "KismetMathLibrary", "BreakRotator", XS + 1700, YS - 1700,
+               [("InRot", "struct", dict(sub=ROT)), ("Roll", "real", dict(subcat="float", out=True)),
+                ("Pitch", "real", dict(subcat="float", out=True)), ("Yaw", "real", dict(subcat="float", out=True))])
+g.link(member_pure(SC_, "K2_GetComponentRotation", XS + 1550, YS - 1850, cam_st, [("ReturnValue", "struct", dict(sub=ROT, out=True))])["ReturnValue"], cvr["InRot"])
+sp0 = self_set("StandP", "real", XS + 1900, YS - 1500, "view pitch at stand-up", subcat="double")
+g.link(cvr["Pitch"], sp0["StandP"])
+sy0 = self_set("StandY", "real", XS + 2150, YS - 1500, "view yaw at stand-up", subcat="double")
+g.link(cvr["Yaw"], sy0["StandY"])
+cu0 = set_abs_rot(XS + 2400, YS - 1500, cam_st, "true", "camera ours while getting up")
+cu1 = set_rot("K2_SetWorldRotation", XS + 2700, YS - 1500, cam_st,
+              make_rot(XS + 2550, YS - 1700, pitch_pin=self_get("StandP", "real", XS + 2400, YS - 1800, subcat="double"),
+                       yaw_pin=self_get("StandY", "real", XS + 2400, YS - 1700, subcat="double")), "view unchanged")
+cu2 = self_set("CamUnhooked", "bool", XS + 3000, YS - 1500, "camera unhooked (stand-up)", default="true")
+face_s = member_call(ACTOR, "K2_SetActorRotation", XS + 3250, YS - 1500, sc["AsPC"], "actor faces the body", [
+    ("NewRotation", "struct", dict(sub=ROT)), ("bTeleportPhysics", "bool", dict(extra='DefaultValue="true",')),
+    ("ReturnValue", "bool", dict(out=True))])
+g.link(make_rot(XS + 3100, YS - 1700, yaw_pin=self_get("BodyYaw", "real", XS + 2950, YS - 1800, subcat="double")), face_s["NewRotation"])
+pcl0 = lib_pure(GS, "GameplayStatics", "GetPlayerController", XS + 3400, YS - 1700,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("PlayerIndex", "int", dict(extra='DefaultValue="0",')),
+                 ("ReturnValue", "object", dict(sub=cls("/Script/Engine.PlayerController"), out=True))])["ReturnValue"]
+lv0 = member_call(cls("/Script/Engine.Controller"), "SetControlRotation", XS + 3550, YS - 1500, pcl0, "aim: level, body-forward",
+                  [("NewRotation", "struct", dict(sub=ROT))])
+lv0.pins["NewRotation"].ref = True
+lv0.pins["NewRotation"].const = True
+g.link(make_rot(XS + 3400, YS - 1850, yaw_pin=self_get("BodyYaw", "real", XS + 3250, YS - 1950, subcat="double")), lv0["NewRotation"])
+st0t = self_set("StandT", "real", XS + 2150, YS - 1300, "stand-up start time", subcat="double")
+g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", XS + 2000, YS - 1200,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"],
+       st0t["StandT"])
+chain(st2, sp0, sy0, st0t, cu0, cu1, cu2, face_s, lv0)
+rel_s = body_release(XS + 1100, YS - 700, sc["AsPC"], lv0, "stand", keep_cam=True)
+# build 54: no walking while the stand-up animation plays (seated mode keeps Walking since build 49); the
+# "walking again" SetMovementMode after the delay turns it back on
+cmc_s = other_get(CHAR, "CharacterMovement", "object", XS + 1100, YS - 1100, sc["AsPC"], sub=CMC)
+stp_s = member_call(cls("/Script/Engine.MovementComponent"), "StopMovementImmediately", XS + 1150, YS - 1300, cmc_s, "stop (stand-up)")
+dmv_s = member_call(CMC, "DisableMovement", XS + 1400, YS - 1300, cmc_s, "no walking until up")
+pcl = lib_pure(GS, "GameplayStatics", "GetPlayerController", XS + 1550, YS - 1100,
+               [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("PlayerIndex", "int", dict(extra='DefaultValue="0",')),
+                ("ReturnValue", "object", dict(sub=cls("/Script/Engine.PlayerController"), out=True))])["ReturnValue"]
+# build 55: no looking around while getting up (vanilla does not allow it either); reset when up
+ilk_s = member_call(cls("/Script/Engine.Controller"), "SetIgnoreLookInput", XS + 1650, YS - 1300, pcl, "no looking until up",
+                    [("bNewLookInput", "bool", dict(extra='DefaultValue="true",'))])
+chain(st1, stp_s, dmv_s, ilk_s, st2)
 shw_s = hands_hidden(XS + 2600, YS - 700, rel_s["then"], sc["AsPC"], "false", "stand")
-chain(shw_s, show_s, yaw_on)
+chain(shw_s, show_s)
 chain(sa_s, ps, dl)
 g.link(dl["then"], mvs["execute"])
 lastr = restore_limits(XS + 10100, YS, "stand", mvs)
@@ -1437,7 +1799,49 @@ rmc.pins["Options"].const = True
 g.link(imc_s["AsInputMappingContext"], rmc["MappingContext"])
 g.link(imc_s["then"], rmc["execute"])
 g.link(rmc["then"], st3["execute"])
-chain(lastr, eq_s, rmi)
+rli = member_call(cls("/Script/Engine.Controller"), "ResetIgnoreLookInput", XS + 10950, YS + 450, pcs, "looking back")
+# build 56: up = look straight ahead (level, the way the body faces); the seated view pitch otherwise came back
+ary = lib_pure(KML, "KismetMathLibrary", "BreakRotator", XS + 10500, YS + 900,
+               [("InRot", "struct", dict(sub=ROT)), ("Roll", "real", dict(subcat="float", out=True)),
+                ("Pitch", "real", dict(subcat="float", out=True)), ("Yaw", "real", dict(subcat="float", out=True))])
+g.link(member_pure(ACTOR, "K2_GetActorRotation", XS + 10300, YS + 900, sc["AsPC"], [("ReturnValue", "struct", dict(sub=ROT, out=True))])["ReturnValue"], ary["InRot"])
+cam_e = cam_of(XS + 10300, YS + 1500, sc["AsPC"])
+he1 = set_abs_rot(XS + 10450, YS + 1300, cam_e, "false", "camera back on the head (up)")
+he2 = set_rot("K2_SetRelativeRotation", XS + 10600, YS + 1300, cam_e,
+              make_rot(XS + 10450, YS + 1500, self_get("CamRelP", "real", XS + 10300, YS + 1600, subcat="double"),
+                       self_get("CamRelY", "real", XS + 10300, YS + 1700, subcat="double")), "")
+he3 = self_set("CamUnhooked", "bool", XS + 10750, YS + 1300, "camera hooked (up)", default="false")
+lvl = member_call(cls("/Script/Engine.Controller"), "SetControlRotation", XS + 10750, YS + 650, pcs, "look straight ahead",
+                  [("NewRotation", "struct", dict(sub=ROT))])
+lvl.pins["NewRotation"].ref = True
+lvl.pins["NewRotation"].const = True
+g.link(make_rot(XS + 10650, YS + 900, yaw_pin=ary["Yaw"]), lvl["NewRotation"])
+neSH = lib_pure(KML, "KismetMathLibrary", "NotEqual_ByteByte", XS + 10800, YS + 800,
+                [("A", "byte", dict(extra='DefaultValue="0",')), ("B", "byte", dict(extra='DefaultValue="0",')), ("ReturnValue", "bool", dict(out=True))])
+g.link(self_get("StandHand", "byte", XS + 10650, YS + 850, sub=HANDENUM), neSH["A"])
+brSH = branch(XS + 10950, YS + 650, "a weapon to give back?", neSH["ReturnValue"])
+chw = member_call(OBJC, "ChangeMainHandWeapon", XS + 11200, YS + 650, sc["AsPC"], "the weapon back (stand-up)", [
+    ("MainHandEquipment", "byte", dict(sub=MHT)),
+    ("HideWeaponTimeLimit", "real", dict(subcat="float", extra='DefaultValue="0.000000",')),
+    ("bShouldSkipAnimation", "bool", dict(extra='DefaultValue="false",'))])
+b2e = Node(g, BG + "K2Node_CastByteToEnum", nm("K2Node_CastByteToEnum"), XS + 11100, YS + 950, "",
+           ["Enum=\"/Script/CoreUObject.Enum'/Script/Stalker2.EMainHandEquipmentType'\"", "bSafe=True"])
+b2e.pin("Byte", "byte")
+b2e.pin("ReturnValue", "byte", sub=MHT, out=True)
+g.link(self_get("StandHand", "byte", XS + 10950, YS + 950), b2e["Byte"])
+g.link(b2e["ReturnValue"], chw["MainHandEquipment"])
+clr = self_set("StandHand", "byte", XS + 11450, YS + 650, "", default="0", sub=HANDENUM)
+g.link(brSH["then"], chw["execute"])
+g.link(chw["then"], clr["execute"])
+sqSH = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), XS + 11700, YS + 650, "")
+sqSH.pin("execute", "exec")
+sqSH.pin("then_0", "exec", out=True)
+g.link(clr["then"], sqSH["execute"])
+g.link(brSH["else"], eq_s["execute"])
+g.link(eq_s["then"], sqSH["execute"])
+g.link(lastr["then"], brSH["execute"])
+g.link(sqSH["then_0"], lvl["execute"])
+chain(lvl, he1, he2, he3, yaw_on, rli, rmi)
 
 # =====================================================================
 # Guitar: G hands back to the vanilla sit
@@ -1720,6 +2124,235 @@ o7d = self_set("PoseAdditive", "bool", X7 + 1350, Y7 + 500, "pose: resting", def
 o7e = self_set("SeatedMode", "bool", X7 + 1600, Y7 + 500, "seated mode: back", default="true")
 g.link(br7o["then"], o7a["execute"])
 chain(o7a, o7b, o7c, o7d, o7e)
+
+# ---- 9 (build 53): Sleeping Bag Mod. Its Config actor (/Sleeping_Bag/Config) reads the bag-use RTPC on tick and
+#      allows sleep only in shelters or within 8 m of the campfires on its own list (most campfires are not on it), so
+#      at our campfires it refused: a sleepy groan, no popup. We take the use first (its tick waits for ours), stand up,
+#      then call its "On Widget Init" (the hours popup; confirm = lay down and sleep). No-op without the mod. ----
+X9, Y9 = 400, 12600
+g.box("EdGraphNode_Comment_914", X9 - 80, Y9 - 300, 7600, 2600, "Sleeping Bag Mod: the bag used while seated = stand up, then its sleep popup")
+sq9 = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X9, Y9, "sleeping bag steps")
+sq9.pin("execute", "exec")
+for k in range(4):
+    sq9.pin(f"then_{k}", "exec", out=True)
+g.link(sq["then_9"], sq9["execute"])
+AKRTPC = cls("/Script/AkAudio.AkRtpc")
+AKGS = cls("/Script/AkAudio.AkGameplayStatics")
+SCR = "\"/Script/CoreUObject.ScriptStruct'/Script/CoreUObject.SoftClassPath'\""
+
+
+def is_valid(x, y, obj_pin):
+    n = lib_pure(KSL, "KismetSystemLibrary", "IsValid", x, y, [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "bool", dict(out=True))])
+    g.link(obj_pin, n["Object"])
+    return n["ReturnValue"]
+
+
+def soft_path(x, y, path):
+    mk = lib_pure(KSL, "KismetSystemLibrary", "MakeSoftObjectPath", x, y,
+                  [("PathString", "string", dict(extra=f'DefaultValue="{path}",')), ("ReturnValue", "struct", dict(sub=SOP, out=True))])
+    return mk["ReturnValue"]
+
+
+def lib_call(lib, libname, member, x, y, comment, pins, default_obj):
+    n = exec_pins(Node(g, BG + "K2Node_CallFunction", nm("K2Node_CallFunction"), x, y, comment,
+                       [f"FunctionReference=(MemberParent={lib},MemberName=\"{member}\")"]))
+    n.pin("self", "object", sub=lib, hidden=True, extra=f'DefaultObject="{default_obj}",')
+    for p_ in pins:
+        n.pin(*p_[:2], **p_[2])
+    return n
+
+
+# 9a: find the mod's Config actor once per sit (class and RTPC are already loaded when the mod runs)
+cfg_ok = is_valid(X9 + 100, Y9 - 100, self_get("SBMUse", "object", X9 - 100, Y9 - 100, sub=AKRTPC))   # build 73: RTPC found = done
+# build 70: the look-up (and the tick-order change it makes on the mod's actor) no longer happens on the first
+# seated tick: three crashes (builds 58, 59, 69), each on the first sit after loading a save, in a Blueprint call
+# made at that moment. Now: while walking around, from 10 s after the world starts, at most every 10 s.
+now9 = lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X9 - 300, Y9 + 400,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])
+since9 = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X9 - 100, Y9 + 400,
+                  [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                   ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(now9["ReturnValue"], since9["A"])
+g.link(self_get("SBMLastTry", "real", X9 - 300, Y9 + 500, subcat="double"), since9["B"])
+late9 = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X9 + 100, Y9 + 400,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="10.0",')),
+                  ("ReturnValue", "bool", dict(out=True))])
+g.link(since9["ReturnValue"], late9["A"])
+c9a = b_and(X9 + 300, Y9 + 250, b_and(X9 + 200, Y9 + 150,
+                                      b_not(X9, Y9 + 150, b_or(X9 - 100, Y9 + 150, self_get("SeatedMode", "bool", X9 - 300, Y9 + 120),
+                                                               b_or(X9 - 200, Y9 + 200, self_get("VanillaHold", "bool", X9 - 400, Y9 + 180), self_get("Standing", "bool", X9 - 400, Y9 + 240)))),
+                                      late9["ReturnValue"]),
+            b_not(X9 + 200, Y9 + 300, cfg_ok))
+br9a = branch(X9 + 500, Y9, "walking around, mod not found yet, 10 s since the last try?", c9a)
+g.link(sq9["then_0"], br9a["execute"])
+t9 = self_set("SBMLastTry", "real", X9 + 800, Y9, "tried now", subcat="double")
+g.link(now9["ReturnValue"], t9["SBMLastTry"])
+g.link(br9a["then"], t9["execute"])
+cvo = lib_pure(KSL, "KismetSystemLibrary", "Conv_SoftObjPathToSoftObjRef", X9 + 2800, Y9 + 300,
+               [("SoftObjectPath", "struct", dict(sub=SOP)), ("ReturnValue", "softobject", dict(sub=OBJ, out=True))])
+cvo.pins["SoftObjectPath"].ref = True
+cvo.pins["SoftObjectPath"].const = True
+g.link(soft_path(X9 + 2550, Y9 + 300, "/Sleeping_Bag/RTPC/SBM_RTPC_Use.SBM_RTPC_Use"), cvo["SoftObjectPath"])
+ldr = exec_pins(Node(g, BG + "K2Node_CallFunction", nm("K2Node_CallFunction"), X9 + 2900, Y9, "its bag-use RTPC",
+                     [f"FunctionReference=(MemberParent={KSL},MemberName=\"LoadAsset_Blocking\")"]))
+ldr.pin("self", "object", sub=KSL, hidden=True, extra='DefaultObject="/Script/Engine.Default__KismetSystemLibrary",')
+ldr.pin("Asset", "softobject", sub=OBJ)
+ldr.pin("ReturnValue", "object", sub=OBJ, out=True)
+g.link(cvo["ReturnValue"], ldr["Asset"])
+g.link(t9["then"], ldr["execute"])
+rcast = exec_pins(Node(g, BG + "K2Node_DynamicCast", nm("K2Node_DynamicCast"), X9 + 3250, Y9, "an RTPC?", [f"TargetType={AKRTPC}"]))
+rcast.pin("CastFailed", "exec", out=True)
+rcast.pin("Object", "object", sub=OBJ)
+rcast.pin("AsAkRtpc", "object", sub=AKRTPC, out=True)
+rcast.pin("bSuccess", "bool", out=True)
+g.link(ldr["ReturnValue"], rcast["Object"])
+g.link(ldr["then"], rcast["execute"])
+suse = self_set("SBMUse", "object", X9 + 3600, Y9, "the bag-use RTPC", sub=AKRTPC)
+g.link(rcast["AsAkRtpc"], suse["SBMUse"])
+g.link(rcast["then"], suse["execute"])
+
+# 9b: not seated: look up again next sit (if the mod was not there yet)
+br9b = branch(X9 + 500, Y9 + 600, "not seated?", b_and(X9 + 300, Y9 + 800, b_not(X9 + 100, Y9 + 800, self_get("SeatedMode", "bool", X9 - 100, Y9 + 800)),
+                                                      self_get("SBMTried", "bool", X9 + 100, Y9 + 900)))
+g.link(sq9["then_1"], br9b["execute"])
+t9b = self_set("SBMTried", "bool", X9 + 800, Y9 + 600, "look up again next sit", default="false")
+g.link(br9b["then"], t9b["execute"])
+
+# 9c: seated and the bag just used: take the use, stand up
+use_ok = is_valid(X9 + 200, Y9 + 1400, self_get("SBMUse", "object", X9, Y9 + 1400, sub=AKRTPC))
+c9c = b_and(X9 + 400, Y9 + 1300, b_and(X9 + 300, Y9 + 1200, self_get("SeatedMode", "bool", X9 + 100, Y9 + 1200),
+                                       b_not(X9 + 100, Y9 + 1280, self_get("Standing", "bool", X9 - 100, Y9 + 1280))), use_ok)
+br9c = branch(X9 + 500, Y9 + 1100, "seated, mod running?", c9c)
+g.link(sq9["then_2"], br9c["execute"])
+grt = lib_call(AKGS, "AkGameplayStatics", "GetRTPCValue", X9 + 800, Y9 + 1100, "bag used? (its RTPC on the player)", [
+    ("RTPCValue", "object", dict(sub=AKRTPC)), ("PlayingID", "int", dict(extra='DefaultValue="0",')),
+    ("InputValueType", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/AkAudio.ERTPCValueType'\"", extra='DefaultValue="GameObject",')),
+    ("Value", "real", dict(subcat="float", out=True)),
+    ("OutputValueType", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/AkAudio.ERTPCValueType'\"", out=True)),
+    ("Actor", "object", dict(sub=ACTOR))], "/Script/AkAudio.Default__AkGameplayStatics")
+grt.pins["RTPCValue"].const = True
+g.link(self_get("SBMUse", "object", X9 + 650, Y9 + 1350, sub=AKRTPC), grt["RTPCValue"])
+g.link(as_pc, grt["Actor"])
+g.link(br9c["then"], grt["execute"])
+used = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X9 + 1150, Y9 + 1350,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.5",')),
+                 ("ReturnValue", "bool", dict(out=True))])
+g.link(grt["Value"], used["A"])
+br9u = branch(X9 + 1300, Y9 + 1100, "bag used?", used["ReturnValue"])
+g.link(grt["then"], br9u["execute"])
+rrt = lib_call(AKGS, "AkGameplayStatics", "ResetRTPCValue", X9 + 1600, Y9 + 1100, "take the use (the mod never sees it)", [
+    ("RTPCValue", "object", dict(sub=AKRTPC)), ("InterpolationTimeMs", "int", dict(extra='DefaultValue="0",')), ("Actor", "object", dict(sub=ACTOR))], "/Script/AkAudio.Default__AkGameplayStatics")
+rrt.pins["RTPCValue"].const = True
+g.link(self_get("SBMUse", "object", X9 + 1450, Y9 + 1350, sub=AKRTPC), rrt["RTPCValue"])
+g.link(as_pc, rrt["Actor"])
+g.link(br9u["then"], rrt["execute"])
+bpc = member_call(PC, "OnBackpackUseEnded", X9 + 1850, Y9 + 900, as_pc, "close the backpack")
+g.link(rrt["then"], bpc["execute"])
+bp9 = self_set("BagPending", "bool", X9 + 1950, Y9 + 1100, "sleep popup after standing up", default="true")
+g.link(bpc["then"], bp9["execute"])
+g.link(bp9["then"], sc["execute"])     # into "Stand up" (same as pressing W)
+
+# 9d: stood up: open the mod's sleep popup
+c9d = b_and(X9 + 400, Y9 + 1900, b_and(X9 + 300, Y9 + 1800, self_get("BagPending", "bool", X9 + 100, Y9 + 1800),
+                                       b_not(X9 + 100, Y9 + 1880, self_get("SeatedMode", "bool", X9 - 100, Y9 + 1880))),
+            b_not(X9 + 300, Y9 + 1960, self_get("Standing", "bool", X9 + 100, Y9 + 1960)))
+br9d = branch(X9 + 500, Y9 + 1700, "stood up for the bag?", c9d)
+g.link(sq9["then_3"], br9d["execute"])
+bp9d = self_set("BagPending", "bool", X9 + 800, Y9 + 1700, "bag handled", default="false")
+g.link(br9d["then"], bp9d["execute"])
+gaa = lib_call(GS, "GameplayStatics", "GetAllActorsOfClass", X9 + 1050, Y9 + 1700, "every actor (once per bag use)",
+               [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)),
+                ("ActorClass", "class", dict(sub=ACTOR, extra=f'DefaultObject="/Script/Engine.Actor",')),
+                ("OutActors", "object", dict(sub=ACTOR, out=True))], "/Script/Engine.Default__GameplayStatics")
+gaa.pins["ActorClass"].wrapper = True
+gaa.pins["OutActors"].container = "Array"
+g.link(bp9d["then"], gaa["execute"])
+fe9 = Node(g, BG + "K2Node_MacroInstance", nm("K2Node_MacroInstance"), X9 + 1400, Y9 + 1700, "find the Sleeping Bag Mod's Config",
+           ["MacroGraphReference=(MacroGraph=\"/Script/Engine.EdGraph'/Engine/EditorBlueprintResources/StandardMacros.StandardMacros:ForEachLoop'\","
+            "GraphBlueprint=\"/Script/Engine.Blueprint'/Engine/EditorBlueprintResources/StandardMacros.StandardMacros'\","
+            "GraphGuid=99DBFD5540A796041F72A5A9DA655026)"])
+fe9.pin("Exec", "exec")
+fe9.pin("Array", "object", sub=ACTOR)
+fe9.pins["Array"].container = "Array"
+fe9.pin("LoopBody", "exec", out=True)
+fe9.pin("Array Element", "object", sub=ACTOR, out=True)
+fe9.pin("Array Index", "int", out=True)
+fe9.pin("Completed", "exec", out=True)
+g.link(gaa["OutActors"], fe9["Array"])
+g.link(gaa["then"], fe9["Exec"])
+opn = lib_pure(KSL, "KismetSystemLibrary", "GetObjectName", X9 + 1700, Y9 + 2050,
+               [("Object", "object", dict(sub=OBJ)), ("ReturnValue", "string", dict(out=True))])
+g.link(fe9["Array Element"], opn["Object"])
+ocn = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary", "StartsWith", X9 + 1900, Y9 + 2050,
+               [("SourceString", "string"), ("InPrefix", "string", dict(extra='DefaultValue="Config_C",')),
+                ("SearchCase", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/CoreUObject.ESearchCase'\"", extra='DefaultValue="IgnoreCase",')),
+                ("ReturnValue", "bool", dict(out=True))])
+g.link(opn["ReturnValue"], ocn["SourceString"])   # the Sleeping Bag Mod's actor: Config_C_<n>
+br9v = branch(X9 + 1750, Y9 + 1700, "the mod's Config, not handled yet?",
+              b_and(X9 + 1700, Y9 + 1900, ocn["ReturnValue"], b_not(X9 + 1600, Y9 + 1950, self_get("SBMDone", "bool", X9 + 1450, Y9 + 1950))))
+g.link(fe9["LoopBody"], br9v["execute"])
+sdn = self_set("SBMDone", "bool", X9 + 2000, Y9 + 1500, "popup asked for", default="true")
+g.link(br9v["then"], sdn["execute"])
+tmr = Node(g, BG + "K2Node_CallFunction", nm("K2Node_CallFunction"), X9 + 2250, Y9 + 1700, "its sleep popup (On Widget Init)",
+           [f"FunctionReference=(MemberParent={KSL},MemberName=\"K2_SetTimer\")"])
+exec_pins(tmr)
+tmr.pin("self", "object", sub=KSL, hidden=True, extra='DefaultObject="/Script/Engine.Default__KismetSystemLibrary",')
+tmr.pin("Object", "object", sub=OBJ)
+tmr.pin("FunctionName", "string", extra='DefaultValue="On Widget Init",')
+tmr.pin("Time", "real", subcat="float", extra='DefaultValue="0.200000",')
+tmr.pin("bLooping", "bool", extra='DefaultValue="false",')
+tmr.pin("ReturnValue", "struct", sub="\"/Script/CoreUObject.ScriptStruct'/Script/Engine.TimerHandle'\"", out=True)
+g.link(fe9["Array Element"], tmr["Object"])
+g.link(sdn["then"], tmr["execute"])
+g.link(fe9["Completed"], self_set("SBMDone", "bool", X9 + 1750, Y9 + 2200, "ready for the next bag use", default="false")["execute"])
+
+# ---- 10 (build 57): getting up: the camera (ours) eases from the seated view to level, body-forward ----
+X10, Y10 = 400, 15600
+g.box("EdGraphNode_Comment_915", X10 - 80, Y10 - 300, 2600, 1000, "Getting up: view eases to level, body-forward")
+br10 = branch(X10 + 300, Y10, "getting up, camera ours?", b_and(X10 + 100, Y10 + 250, self_get("Standing", "bool", X10 - 100, Y10 + 200),
+                                                                self_get("CamUnhooked", "bool", X10 - 100, Y10 + 300)))
+g.link(sq["then_10"], br10["execute"])
+# build 58: eased over the whole stand-up (STAND_EASE s, ease in-out) from the view at the key press; build 57's
+# RInterpTo reached forward in about a second
+STAND_EASE = 3.5
+now10 = lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X10 + 100, Y10 + 700,
+                 [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])
+el10 = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X10 + 300, Y10 + 700,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                 ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(now10["ReturnValue"], el10["A"])
+g.link(self_get("StandT", "real", X10 + 100, Y10 + 800, subcat="double"), el10["B"])
+fr10 = lib_pure(KML, "KismetMathLibrary", "Divide_DoubleDouble", X10 + 500, Y10 + 700,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra=f'DefaultValue="{STAND_EASE}",')),
+                 ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(el10["ReturnValue"], fr10["A"])
+cl10 = lib_pure(KML, "KismetMathLibrary", "FClamp", X10 + 700, Y10 + 700,
+                [("Value", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("Min", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                 ("Max", "real", dict(subcat="double", extra='DefaultValue="1.0",')), ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(fr10["ReturnValue"], cl10["Value"])
+ea10 = lib_pure(KML, "KismetMathLibrary", "FInterpEaseInOut", X10 + 900, Y10 + 700,
+                [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="1.0",')),
+                 ("Alpha", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                 ("Exponent", "real", dict(subcat="double", extra='DefaultValue="2.0",')),
+                 ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(cl10["ReturnValue"], ea10["Alpha"])
+rl10 = lib_pure(KML, "KismetMathLibrary", "RLerp", X10 + 1100, Y10 + 300,
+                [("A", "struct", dict(sub=ROT)), ("B", "struct", dict(sub=ROT)),
+                 ("Alpha", "real", dict(subcat="float", extra='DefaultValue="0.0",')),
+                 ("bShortestPath", "bool", dict(extra='DefaultValue="true",')),
+                 ("ReturnValue", "struct", dict(sub=ROT, out=True))])
+g.link(make_rot(X10 + 300, Y10 + 300, pitch_pin=self_get("StandP", "real", X10 + 150, Y10 + 300, subcat="double"),
+                yaw_pin=self_get("StandY", "real", X10 + 150, Y10 + 400, subcat="double")), rl10["A"])
+g.link(make_rot(X10 + 300, Y10 + 500, yaw_pin=self_get("BodyYaw", "real", X10 + 150, Y10 + 550, subcat="double")), rl10["B"])
+g.link(ea10["ReturnValue"], rl10["Alpha"])
+c10 = set_rot("K2_SetWorldRotation", X10 + 1400, Y10, cam_of(X10 + 1250, Y10 + 450, as_pc), rl10["ReturnValue"], "camera = eased view")
+g.link(br10["then"], c10["execute"])
+
+# build 71: every pose table starts on the frame for the current view (it started on frame 0 = view yaw -75 deg,
+# pitch -60 until the next tick set it: one wrong frame blended in = the left hand jumping ~25 cm when the arms
+# went back to the lap after a drink / the backpack)
+for node, kind in POSE_PLAYS:
+    g.link(rpos["ReturnValue"] if kind == "rest" else mrc["ReturnValue"], node["InTimeToStartMontageAt"])
 
 write(sys.argv[1], g.text())
 print("ok", len(g.nodes), "nodes")

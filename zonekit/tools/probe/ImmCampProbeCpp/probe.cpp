@@ -15,6 +15,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <set>
 
 using namespace RC;
 using namespace RC::Unreal;
@@ -275,7 +276,34 @@ public:
             lf.X - a.X, lf.Y - a.Y, lf.Z - a.Z, rh.X - a.X, rh.Y - a.Y, rh.Z - a.Z, lh.X - a.X, lh.Y - a.Y, lh.Z - a.Z, sp.X - a.X, sp.Y - a.Y, sp.Z - a.Z, hp.X - a.X, hp.Y - a.Y, hp.Z - a.Z, mont.c_str());
         Output::send<LogLevel::Verbose>(STR("[CampProbe] tr {}\n"), StringType(b));
     }
+    // visible widgets while seated (build 49: which widget shows the "Play guitar" hint; does the Sleeping Bag Mod
+    // popup exist): once a second, log the classes that appear / disappear
+    std::set<StringType> m_wLast; uint64_t m_wT = 0;
+    void Widgets(uint64_t now) {
+        if (now - m_wT < 1000) return; m_wT = now;
+        bool active = m_bSeated == 1 || (m_bAct && !m_bAct->IsUnreachable() && BoolVar(m_bAct, STR("VanillaHold")));
+        if (!active) { m_wLast.clear(); return; }
+        std::set<StringType> cur;
+        UObjectGlobals::ForEachUObject([&](UObject* o, int32, int32) {
+            if (!o || o->IsUnreachable()) return LoopAction::Continue;
+            UClass* c = o->GetClassPrivate(); bool isUW = false;
+            for (UStruct* w = c; w; w = w->GetSuperStruct()) if (w->GetName() == StringType(STR("UserWidget"))) { isUW = true; break; }
+            if (!isUW) return LoopAction::Continue;
+            StringType on = o->GetName(); if (on.rfind(STR("Default__"), 0) == 0) return LoopAction::Continue;
+            if (CallBool(o, STR("IsVisible")) == 1) {
+                int inVp = CallBool(o, STR("IsInViewport"));
+                cur.insert(c->GetName() + (inVp == 1 ? STR("[vp]") : STR("")));
+            }
+            return LoopAction::Continue;
+        });
+        StringType add, rem;
+        for (auto& n : cur) if (!m_wLast.count(n)) add += n + STR(" ");
+        for (auto& n : m_wLast) if (!cur.count(n)) rem += n + STR(" ");
+        if (!add.empty() || !rem.empty()) Output::send<LogLevel::Verbose>(STR("[CampProbe] widgets +[{}] -[{}]\n"), add, rem);
+        m_wLast = cur;
+    }
     void Burst(uint64_t now) {
+        // Widgets(now);   // build 50: ProcessEvent on every widget crashed the game when a context menu opened
         MontageEvents(now);
         Trace(now);
         m_frame++;
