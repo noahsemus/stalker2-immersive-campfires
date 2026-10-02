@@ -648,7 +648,7 @@ tc = player_cast(300, 0, "tick", [tick["then"]])
 as_pc = tc["AsPC"]
 sq = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), 600, 0, "tick steps")
 sq.pin("execute", "exec")
-for k in range(12):
+for k in range(13):
     sq.pin(f"then_{k}", "exec", out=True)
 g.link(tc["then"], sq["execute"])
 
@@ -697,7 +697,8 @@ X1, Y1 = 1200, -700
 g.box("EdGraphNode_Comment_902", X1 - 80, Y1 - 120, 900, 400, "Release vanilla hold (stood up from the vanilla sit)")
 c1 = b_and(X1 - 200, Y1 + 200, self_get("VanillaHold", "bool", X1 - 400, Y1 + 160),
            b_and(X1 - 300, Y1 + 300, b_not(X1 - 400, Y1 + 260, seated_flag),
-                 b_not(X1 - 400, Y1 + 360, self_get("GuitarPending", "bool", X1 - 600, Y1 + 360))))
+                 b_and(X1 - 350, Y1 + 400, b_not(X1 - 400, Y1 + 360, self_get("GuitarPending", "bool", X1 - 600, Y1 + 360)),
+                       b_not(X1 - 400, Y1 + 460, self_get("ExitPending", "bool", X1 - 600, Y1 + 460)))))
 br1 = branch(X1, Y1, "vanilla sit over?", c1)
 g.link(sq["then_1"], br1["execute"])
 s1 = self_set("VanillaHold", "bool", X1 + 300, Y1, "vanilla hold: off", default="false")
@@ -836,7 +837,8 @@ section = member_pure(ANIMI, "Montage_GetCurrentSection", X2 - 700, Y2 + 440, an
                        ("ReturnValue", "name", dict(out=True))])["ReturnValue"]
 c2 = b_and(X2 - 200, Y2 + 240,
            b_and(X2 - 400, Y2 + 200, seated_flag, b_not(X2 - 600, Y2 + 240, self_get("SeatedMode", "bool", X2 - 800, Y2 + 240))),
-           b_and(X2 - 400, Y2 + 360, b_not(X2 - 600, Y2 + 340, self_get("VanillaHold", "bool", X2 - 800, Y2 + 340)),
+           b_and(X2 - 400, Y2 + 360, b_and(X2 - 500, Y2 + 320, b_not(X2 - 600, Y2 + 340, self_get("VanillaHold", "bool", X2 - 800, Y2 + 340)),
+                                            b_not(X2 - 600, Y2 + 300, self_get("Standing", "bool", X2 - 800, Y2 + 300))),
                  name_eq(X2 - 500, Y2 + 440, section, "Idle")))
 loc2 = member_pure(ACTOR, "K2_GetActorLocation", X2 - 900, Y2 + 600, as_pc, [("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"]
 mv2 = lib_pure(KML, "KismetMathLibrary", "Subtract_VectorVector", X2 - 700, Y2 + 600,
@@ -2019,13 +2021,66 @@ pcl = lib_pure(GS, "GameplayStatics", "GetPlayerController", XS + 1550, YS - 110
 ilk_s = member_call(cls("/Script/Engine.Controller"), "SetIgnoreLookInput", XS + 1650, YS - 1300, pcl, "no looking until up",
                     [("bNewLookInput", "bool", dict(extra='DefaultValue="true",'))])
 g.link(st1["then"], stp_s["execute"])
-g.link(stp_s["then"], dmv_s["execute"])
-g.link(dmv_s["then"], ilk_s["execute"])
+wlk_s = member_call(CMC, "SetMovementMode", XS + 1400, YS - 1500, cmc_s, "walking mode (the vanilla sit takes the body)",
+                    [("NewMovementMode", "byte", dict(sub=MOVEMODE, extra='DefaultValue="MOVE_Walking",')),
+                     ("NewCustomMode", "byte", dict(extra='DefaultValue="0",'))])
+by_s = self_set("BodyYaw", "real", XS + 1650, YS - 1500, "body = the seat's yaw (the vanilla sit faces it)", subcat="double")
+g.link(self_get("SeatYaw", "real", XS + 1500, YS - 1350, subcat="double"), by_s["BodyYaw"])
+g.link(stp_s["then"], wlk_s["execute"])
+g.link(wlk_s["then"], by_s["execute"])
+g.link(by_s["then"], ilk_s["execute"])
 g.link(release(XS + 1800, YS - 2400, ilk_s["then"], "stand-up", False), st2["execute"])
 shw_s = hands_hidden(XS + 2600, YS - 700, rel_s["then"], sc["AsPC"], "false", "stand")
 chain(shw_s, show_s)
-chain(sa_s, ps, dl)
-g.link(dl["then"], mvs["execute"])
+dlx = delay(XS + 5300, YS - 300, 0.05, "one frame (stand)")
+# build 90: our seated pose is NOT stopped before the hand-back: with it stopped, Skif stood for a moment before
+# the vanilla sit came in (tester). The game's sit montage replaces it (same slot group) and starts at the end of
+# its sit-down (step 11's montage-started event), so the pose goes seated -> seated.
+show_s["then"].links.remove(sa_s["execute"])
+sa_s["execute"].links.remove(show_s["then"])
+g.link(show_s["then"], dlx["execute"])
+locx = set_actor_loc(XS + 5600, YS - 300, sc["AsPC"], self_get("SeatLoc", "struct", XS + 5450, YS - 50, sub=VEC), "on the seat spot (stand)")
+g.link(dlx["then"], locx["execute"])
+cax = member_pure(cls("/Script/Engine.ActorComponent"), "GetOwner", XS + 5700, YS + 200,
+                  self_get("TargetSaved", "object", XS + 5550, YS + 200, sub=ICOMP), [("ReturnValue", "object", dict(sub=ACTOR, out=True))])["ReturnValue"]
+caxl = member_pure(ACTOR, "K2_GetActorLocation", XS + 5900, YS + 300, cax, [("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"]
+scx = self_set("CAOrig", "struct", XS + 5900, YS - 300, "the seat point's own spot (stand)", sub=VEC)
+g.link(caxl, scx["CAOrig"])
+g.link(locx["then"], scx["execute"])
+scxo = self_set("CAActor", "object", XS + 6150, YS - 300, "the seat point (stand)", sub=ACTOR)
+g.link(cax, scxo["CAActor"])
+g.link(scx["then"], scxo["execute"])
+myx = member_pure(ACTOR, "K2_GetActorLocation", XS + 6200, YS + 400, sc["AsPC"], [("ReturnValue", "struct", dict(sub=VEC, out=True))])["ReturnValue"]
+mbx = lib_pure(KML, "KismetMathLibrary", "BreakVector", XS + 6400, YS + 400,
+               [("InVec", "struct", dict(sub=VEC)), ("X", "real", dict(subcat="double", out=True)), ("Y", "real", dict(subcat="double", out=True)),
+                ("Z", "real", dict(subcat="double", out=True))])
+g.link(myx, mbx["InVec"])
+cbx = lib_pure(KML, "KismetMathLibrary", "BreakVector", XS + 6400, YS + 600,
+               [("InVec", "struct", dict(sub=VEC)), ("X", "real", dict(subcat="double", out=True)), ("Y", "real", dict(subcat="double", out=True)),
+                ("Z", "real", dict(subcat="double", out=True))])
+g.link(caxl, cbx["InVec"])
+mkx = lib_pure(KML, "KismetMathLibrary", "MakeVector", XS + 6600, YS + 500,
+               [("X", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("Y", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                ("Z", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("ReturnValue", "struct", dict(sub=VEC, out=True))])
+g.link(mbx["X"], mkx["X"])
+g.link(mbx["Y"], mkx["Y"])
+g.link(cbx["Z"], mkx["Z"])
+mvx = set_actor_loc(XS + 6400, YS - 300, self_get("CAActor", "object", XS + 6250, YS - 50, sub=ACTOR), mkx["ReturnValue"], "seat point under us (no lerp)")
+g.link(scxo["then"], mvx["execute"])
+cmx = self_set("CAMoved", "bool", XS + 6700, YS - 300, "seat point moved (stand)", default="true")
+g.link(mvx["then"], cmx["execute"])
+vhx = self_set("VanillaHold", "bool", XS + 6950, YS - 300, "vanilla sit: the game's (stand)", default="true")
+g.link(cmx["then"], vhx["execute"])
+epx = self_set("ExitPending", "bool", XS + 7200, YS - 300, "press the exit once it idles", default="true")
+g.link(vhx["then"], epx["execute"])
+etx = self_set("ExitT", "real", XS + 7450, YS - 300, "hand-back time", subcat="double")
+g.link(lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", XS + 7350, YS - 100,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])["ReturnValue"], etx["ExitT"])
+g.link(epx["then"], etx["execute"])
+backx = member_call(PC, "SetInteractionTarget", XS + 7700, YS - 300, sc["AsPC"], "resume the vanilla sit (stand)", [("Target", "object", dict(sub=ICOMP))])
+g.link(self_get("TargetSaved", "object", XS + 7550, YS - 50, sub=ICOMP), backx["Target"])
+g.link(etx["then"], backx["execute"])
+# the end steps (mvs ...) are started by tick step 12 once the game's sit is over
 lastr = restore_limits(XS + 10100, YS, "stand", mvs)
 st3 = self_set("Standing", "bool", XS + 11300, YS, "standing: off", default="false")
 eq_s = member_call(PC, "EquipLastHeldItem", XS + 10900, YS + 250, sc["AsPC"], "weapon back")
@@ -2088,12 +2143,21 @@ sqSH = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), 
 sqSH.pin("execute", "exec")
 sqSH.pin("then_0", "exec", out=True)
 g.link(clr["then"], sqSH["execute"])
-g.link(brSH["else"], eq_s["execute"])
+hE = member_pure(OBJC, "GetMainHandEquipType", XS + 10700, YS + 1100, sc["AsPC"], [("ReturnValue", "byte", dict(sub=HANDENUM, out=True))])["ReturnValue"]
+hE0 = lib_pure(KML, "KismetMathLibrary", "EqualEqual_ByteByte", XS + 10900, YS + 1100,
+               [("A", "byte", dict(extra='DefaultValue="0",')), ("B", "byte", dict(extra='DefaultValue="0",')), ("ReturnValue", "bool", dict(out=True))])
+g.link(hE, hE0["A"])
+brEq = branch(XS + 10950, YS + 1000, "hands still empty after the restore?", hE0["ReturnValue"])
+g.link(brSH["else"], brEq["execute"])
+g.link(brEq["then"], eq_s["execute"])
+g.link(brEq["else"], sqSH["execute"])
 g.link(eq_s["then"], sqSH["execute"])
 # build 85: stood up for the Sleeping Bag Mod -> stay unarmed: the weapon the game put back when the backpack
 # closed is taken out of the hands, the hidden hand meshes are shown again (empty), no weapon back
 brBag = branch(XS + 10300, YS - 800, "stood up for the sleeping bag? (stay unarmed)", self_get("BagPending", "bool", XS + 10150, YS - 650))
-g.link(lastr["then"], brBag["execute"])
+rti_e = member_call(PC, "ResetInteractionTarget", XS + 10200, YS - 1100, sc["AsPC"], "no interaction target (up)")
+eia_e = member_call(PC, "EnableInputAfterInteraction", XS + 10450, YS - 1100, sc["AsPC"], "input after the interaction (up)")
+g.link(lastr["then"], brBag["execute"])   # build 89: the vanilla exit restores the states
 g.link(brBag["else"], brSH["execute"])
 rwz = member_call(OBJC, "RemoveWeaponFromHands", XS + 10600, YS - 800, sc["AsPC"], "no weapon (sleeping bag)")
 g.link(brBag["then"], rwz["execute"])
@@ -2316,7 +2380,8 @@ late6 = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X6 + 300, Y6 
                   ("ReturnValue", "bool", dict(out=True))])
 g.link(age6["ReturnValue"], late6["A"])  # fallback: the guitar never came out
 c6 = b_and(X6 + 600, Y6 + 300,
-           b_and(X6 + 450, Y6 + 250, self_get("VanillaHold", "bool", X6 + 250, Y6 + 200),
+           b_and(X6 + 450, Y6 + 250, b_and(X6 + 350, Y6 + 150, self_get("VanillaHold", "bool", X6 + 250, Y6 + 200),
+                                            b_not(X6 + 250, Y6 + 100, self_get("Standing", "bool", X6 + 50, Y6 + 100))),
                  b_not(X6 + 250, Y6 + 300, self_get("GuitarPending", "bool", X6 + 50, Y6 + 300))),
            b_and(X6 + 450, Y6 + 400,
                  b_and(X6 + 350, Y6 + 450, seated_flag, b_not(X6 + 350, Y6 + 550, bk6["bPlayingGuitar"])),
@@ -2572,6 +2637,96 @@ br9e = branch(X9 + 500, Y9 + 2400, "getting up for the bag?", b_and(X9 + 300, Y9
 g.link(sq9["then_4"], br9e["execute"])
 hands_hidden(X9 + 800, Y9 + 2400, br9e["then"], as_pc, "true", "getting up for the bag")
 
+# ---- 12 (build 89): stand-up through the vanilla exit ----
+X12, Y12 = 400, 18800
+g.box("EdGraphNode_Comment_917", X12 - 80, Y12 - 400, 4200, 1600, "Stand-up: the vanilla sit's own exit (the game finishes the sit)")
+sq12 = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), X12, Y12, "stand-up via the vanilla exit")
+sq12.pin("execute", "exec")
+sq12.pin("then_0", "exec", out=True)
+sq12.pin("then_1", "exec", out=True)
+g.link(sq["then_12"], sq12["execute"])
+sec12 = member_pure(ANIMI, "Montage_GetCurrentSection", X12 + 100, Y12 + 450, anim,
+                    [("Montage", "object", dict(sub=MONT, extra=f'DefaultObject="{SIT}",')), ("ReturnValue", "name", dict(out=True))])["ReturnValue"]
+now12 = lib_pure(KSL, "KismetSystemLibrary", "GetGameTimeInSeconds", X12 + 100, Y12 + 650,
+                 [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("ReturnValue", "real", dict(subcat="double", out=True))])
+age12 = lib_pure(KML, "KismetMathLibrary", "Subtract_DoubleDouble", X12 + 300, Y12 + 650,
+                 [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                  ("ReturnValue", "real", dict(subcat="double", out=True))])
+g.link(now12["ReturnValue"], age12["A"])
+g.link(self_get("ExitT", "real", X12 + 100, Y12 + 750, subcat="double"), age12["B"])
+br12 = branch(X12 + 300, Y12 - 200, "exit to press?", self_get("ExitPending", "bool", X12 + 100, Y12 - 50))
+g.link(sq12["then_0"], br12["execute"])
+gp12 = member_pure(ANIMI, "Montage_GetPosition", X12 + 300, Y12 + 850, anim,
+                   [("Montage", "object", dict(sub=MONT, extra=f'DefaultObject="{SIT}",')), ("ReturnValue", "real", dict(subcat="float", out=True))])
+gp12.pins["Montage"].const = True
+early12 = lib_pure(KML, "KismetMathLibrary", "Less_DoubleDouble", X12 + 500, Y12 + 850,
+                   [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="3.9",')),
+                    ("ReturnValue", "bool", dict(out=True))])
+g.link(gp12["ReturnValue"], early12["A"])
+brin12 = branch(X12 + 600, Y12 - 200, "sitting down, early?", b_and(X12 + 550, Y12 + 300, name_eq(X12 + 400, Y12 + 300, sec12, "In"), early12["ReturnValue"]))
+g.link(br12["then"], brin12["execute"])
+skp12 = member_call(ANIMI, "Montage_SetPosition", X12 + 900, Y12 - 300, anim, "to the end of the sit-down (keeps its notify)", [
+    ("Montage", "object", dict(sub=MONT, extra=f'DefaultObject="{SIT}",')), ("NewPosition", "real", dict(subcat="float", extra='DefaultValue="3.930000",'))])
+skp12.pins["Montage"].const = True
+g.link(brin12["then"], skp12["execute"])
+late12 = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X12 + 500, Y12 + 750,
+                  [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="6.0",')),
+                   ("ReturnValue", "bool", dict(out=True))])
+g.link(age12["ReturnValue"], late12["A"])
+bri12 = branch(X12 + 900, Y12 - 50, "seated idle (or 6 s)?",
+               b_or(X12 + 850, Y12 + 150, b_and(X12 + 800, Y12 + 100, name_eq(X12 + 700, Y12 + 100, sec12, "Idle"), seated_flag), late12["ReturnValue"]))
+g.link(brin12["else"], bri12["execute"])
+ep0 = self_set("ExitPending", "bool", X12 + 1200, Y12 - 50, "exit pressed", default="false")
+g.link(bri12["then"], ep0["execute"])
+ei1 = self_set("ExitInjected", "bool", X12 + 1450, Y12 - 50, "wait for the game's exit", default="true")
+g.link(ep0["then"], ei1["execute"])
+sub12 = Node(g, BG + "K2Node_GetSubsystemFromPC", nm("K2Node_GetSubsystemFromPC"), X12 + 1500, Y12 + 300, "", [f"CustomClass={EILPS}"])
+sub12.pin("PlayerController", "object", sub=cls("/Script/Engine.PlayerController"))
+sub12.pin("ReturnValue", "object", sub=EILPS, out=True)
+g.link(lib_pure(GS, "GameplayStatics", "GetPlayerController", X12 + 1300, Y12 + 300,
+                [("WorldContextObject", "object", dict(sub=OBJ, hidden=True)), ("PlayerIndex", "int", dict(extra='DefaultValue="0",')),
+                 ("ReturnValue", "object", dict(sub=cls("/Script/Engine.PlayerController"), out=True))])["ReturnValue"], sub12["PlayerController"])
+mkv12 = lib_pure(cls("/Script/EnhancedInput.EnhancedInputLibrary"), "EnhancedInputLibrary", "MakeInputActionValueOfType", X12 + 1500, Y12 + 500,
+                 [("X", "real", dict(subcat="double", extra='DefaultValue="1.0",')),
+                  ("Y", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                  ("Z", "real", dict(subcat="double", extra='DefaultValue="0.0",')),
+                  ("ValueType", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/EnhancedInput.EInputActionValueType'\"", extra='DefaultValue="Boolean",')),
+                  ("ReturnValue", "struct", dict(sub=IAV, out=True))])
+mkv12.pins["self"].extra = 'DefaultObject="/Script/EnhancedInput.Default__EnhancedInputLibrary",'
+inj12 = member_call(EISI, "InjectInputForAction", X12 + 1750, Y12 - 50, sub12["ReturnValue"], "press the exit (the game's stand-up)", [
+    ("Action", "object", dict(sub=IA_CLS, extra=f'DefaultObject="{IA_DIR}IA_PlayerCAExit.IA_PlayerCAExit",')),
+    ("RawValue", "struct", dict(sub=IAV)),
+    ("Modifiers", "object", dict(sub=cls("/Script/EnhancedInput.InputModifier"))),
+    ("Triggers", "object", dict(sub=cls("/Script/EnhancedInput.InputTrigger")))])
+inj12.pins["Action"].const = True
+inj12.pins["self"].cat = "interface"
+for an in ("Modifiers", "Triggers"):
+    inj12.pins[an].container = "Array"
+    inj12.pins[an].ref = True
+    inj12.pins[an].const = True
+g.link(mkv12["ReturnValue"], inj12["RawValue"])
+g.link(ei1["then"], inj12["execute"])
+# the game's sit is over (or 14 s): our end steps
+sitp12 = member_pure(ANIMI, "Montage_IsPlaying", X12 + 300, Y12 + 1000, anim,
+                     [("Montage", "object", dict(sub=MONT, extra=f'DefaultObject="{SIT}",')), ("ReturnValue", "bool", dict(out=True))])
+sitp12.pins["Montage"].const = True
+late14 = lib_pure(KML, "KismetMathLibrary", "Greater_DoubleDouble", X12 + 500, Y12 + 1100,
+                  [("A", "real", dict(subcat="double", extra='DefaultValue="0.0",')), ("B", "real", dict(subcat="double", extra='DefaultValue="14.0",')),
+                   ("ReturnValue", "bool", dict(out=True))])
+g.link(age12["ReturnValue"], late14["A"])
+brd12 = branch(X12 + 600, Y12 + 600, "the game's sit over (or 14 s)?",
+               b_and(X12 + 550, Y12 + 900, self_get("ExitInjected", "bool", X12 + 300, Y12 + 900),
+                     b_or(X12 + 500, Y12 + 1000, b_and(X12 + 450, Y12 + 950, b_not(X12 + 350, Y12 + 950, seated_flag), b_not(X12 + 450, Y12 + 1050, sitp12["ReturnValue"])),
+                          late14["ReturnValue"])))
+g.link(sq12["then_1"], brd12["execute"])
+ei0 = self_set("ExitInjected", "bool", X12 + 900, Y12 + 600, "exit done", default="false")
+g.link(brd12["then"], ei0["execute"])
+sfb12 = member_call(ANIMI, "StopSlotAnimation", X12 + 1150, Y12 + 600, anim, "nothing of ours left in FullBody (safety)", [
+    ("InBlendOutTime", "real", dict(subcat="float", extra='DefaultValue="0.250000",')),
+    ("SlotNodeName", "name", dict(extra='DefaultValue="FullBody",'))])
+g.link(ei0["then"], sfb12["execute"])
+g.link(sfb12["then"], mvs["execute"])   # our end steps (walking, limits, weapon, camera back, controls)
+
 # ---- 11 (build 87): every montage the game starts (OnMontageStarted): remember the last one that is not ours
 #      (our pose montages loop 1,000,000 times: play length > 1000 s) and not a weapon (un)equip ----
 X11, Y11 = 400, 17200
@@ -2617,7 +2772,17 @@ eq11 = lib_pure(cls("/Script/Engine.KismetStringLibrary"), "KismetStringLibrary"
 g.link(on11["ReturnValue"], eq11["SearchIn"])
 bm11 = branch(X11 + 700, Y11 + 500, "an item / PDA / backpack montage? (not our pose, not a weapon draw)",
               b_and(X11 + 650, Y11 + 750, lt11["ReturnValue"], b_not(X11 + 650, Y11 + 850, eq11["ReturnValue"])))
-g.link(ev11["then"], bm11["execute"])
+eqs11 = lib_pure(KML, "KismetMathLibrary", "EqualEqual_ObjectObject", X11 + 300, Y11 + 1000,
+                 [("A", "object", dict(sub=OBJ)), ("B", "object", dict(sub=OBJ, extra=f'DefaultObject="{SIT}",')), ("ReturnValue", "bool", dict(out=True))])
+g.link(ev11["Montage"], eqs11["A"])
+brs11 = branch(X11 + 400, Y11 + 1200, "the game's sit, for our stand-up?", b_and(X11 + 350, Y11 + 1100, eqs11["ReturnValue"], self_get("ExitPending", "bool", X11 + 150, Y11 + 1150)))
+g.link(ev11["then"], brs11["execute"])
+sk11 = member_call(ANIMI, "Montage_SetPosition", X11 + 700, Y11 + 1200, anim, "start at the end of its sit-down (build 90)", [
+    ("Montage", "object", dict(sub=MONT, extra=f'DefaultObject="{SIT}",')), ("NewPosition", "real", dict(subcat="float", extra='DefaultValue="3.930000",'))])
+sk11.pins["Montage"].const = True
+g.link(brs11["then"], sk11["execute"])
+g.link(sk11["then"], bm11["execute"])
+g.link(brs11["else"], bm11["execute"])
 sl11 = self_set("LastStarted", "object", X11 + 1000, Y11 + 500, "the last montage the game started", sub=MONTCLS)
 g.link(ev11["Montage"], sl11["LastStarted"])
 g.link(bm11["then"], sl11["execute"])

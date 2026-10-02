@@ -53,6 +53,12 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   rest / free arms every ~0.1 s: the item is the last montage the game started (`OnMontageStarted`, bound per anim
   instance; ours skipped by play length > 1000 s), not `GetCurrentActiveMontage`.
 
+- 2026-10-01 v1.0.1 (Noah: "good works"): saving was blocked after any sit (the takeover ended the vanilla sit by
+  clearing the interaction target; the game only unlocks saves when the sit's own exit finishes). Builds 88-90:
+  stand-up hands the body back to the vanilla sit (`SetInteractionTarget(TargetSaved)`, seat point under us), the
+  sit montage starts at 3.93 s from the montage-started event (no sit-down frame; our pose stays on until then),
+  `InjectInputForAction(IA_PlayerCAExit)` at idle, our end steps once the game's sit is over (tick step 12).
+
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
   Exclusive; W/A/S/D/Space/F/Esc = `IA_PlayerCAExit`). While any interaction is in progress native PDA / backpack /

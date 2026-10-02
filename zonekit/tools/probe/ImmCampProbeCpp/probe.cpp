@@ -396,6 +396,68 @@ public:
         if (ign != m_gIgnLook) { Output::send<LogLevel::Verbose>(STR("[CampProbe] lookIgnored={} t={}\n"), ign, now % 100000); m_gIgnLook = ign; }
     }
 
+    // ---- v1.0.0 "can't save after a sit": every property of the pawn, its controller and their components, before
+    // the sit vs 3 s after standing up; differences logged once ("[CampProbe] diff ...") ----
+    using Snap = std::vector<std::pair<StringType, StringType>>;
+    Snap m_base; std::vector<Snap> m_ring; bool m_inSit = false; uint64_t m_idleSince = 0, m_baseT = 0;
+    static StringType PropVal(UObject* o, FProperty* p) {
+        uint8_t* raw = p->ContainerPtrToValuePtr<uint8_t>(o); if (!raw) return STR("?");
+        if (FBoolProperty* b = CastField<FBoolProperty>(p)) return b->GetPropertyValue(raw) ? STR("1") : STR("0");
+        if (CastField<FObjectProperty>(p)) { UObject* v = *reinterpret_cast<UObject**>(raw); return v ? v->GetName() : StringType(STR("null")); }
+        if (CastField<FArrayProperty>(p)) return StringType(STR("n=")) + std::to_wstring(*reinterpret_cast<int32_t*>(raw + 8));
+        int32_t sz = p->GetSize(); if (sz > 64) sz = 64;
+        wchar_t h[140]; int k = 0; for (int i = 0; i < sz && k < 130; ++i) k += swprintf_s(h + k, 140 - k, L"%02x", raw[i]);
+        return StringType(h);
+    }
+    static void SnapObj(UObject* o, const StringType& tag, Snap& out) {
+        if (!o || o->IsUnreachable()) return;
+        for (FProperty* p : o->GetClassPrivate()->ForEachPropertyInChain()) out.emplace_back(tag + STR(".") + p->GetName(), PropVal(o, p));
+    }
+    static void SnapTree(UObject* o, const StringType& tag, Snap& out) {
+        SnapObj(o, tag, out);
+        if (!o) return;
+        StringType path = o->GetPathName() + STR(".");
+        for (FProperty* p : o->GetClassPrivate()->ForEachPropertyInChain()) {
+            if (!CastField<FObjectProperty>(p)) continue;
+            UObject* v = *reinterpret_cast<UObject**>(p->ContainerPtrToValuePtr<uint8_t>(o));
+            if (v && !v->IsUnreachable() && v->GetPathName().rfind(path, 0) == 0) SnapObj(v, tag + STR(".") + p->GetName(), out);
+        }
+    }
+    Snap TakeSnap(UObject* pawn) {
+        Snap s; SnapTree(pawn, STR("PC"), s); SnapTree(ObjProp(pawn, STR("Controller")), STR("Ctl"), s);
+        // the save lock may live outside the pawn: the save managers and the seat actors
+        for (const wchar_t* cn : { L"SaveLoadManager", L"AutoSaveManager" }) SnapTree(UObjectGlobals::FindFirstOf(cn), cn, s);
+        std::vector<UObject*> cas; UObjectGlobals::FindAllOf(STR("BP_PlayerContextualAction_C"), cas);
+        for (UObject* c : cas) if (c && !c->IsUnreachable()) SnapTree(c, STR("CA:") + c->GetName(), s);
+        return s;
+    }
+    uint64_t m_seatT = 0; bool m_seatDone = false;
+    void LogDiff(UObject* pawn, const wchar_t* tag) {
+        Snap after = TakeSnap(pawn); int n = 0;
+        for (auto& a : after) {
+            bool found = false;
+            for (auto& b : m_base) if (a.first == b.first) { found = true; if (a.second != b.second) { Output::send<LogLevel::Verbose>(STR("[CampProbe] {} {} : {} -> {}\n"), tag, a.first, b.second, a.second); ++n; } break; }
+            if (!found) { Output::send<LogLevel::Verbose>(STR("[CampProbe] {} NEW {} = {}\n"), tag, a.first, a.second); ++n; }
+        }
+        Output::send<LogLevel::Verbose>(STR("[CampProbe] {} done: {} changed of {} (base {})\n"), tag, n, after.size(), m_base.size());
+    }
+    void StateDiff(UObject* pawn, int seated, uint64_t now) {
+        if (!pawn || pawn->IsUnreachable()) return;
+        bool busy = seated == 1 || (m_cAct && !m_cAct->IsUnreachable() && (BoolVar(m_cAct, STR("VanillaHold")) || BoolVar(m_cAct, STR("Standing")) || BoolVar(m_cAct, STR("SeatedMode"))));
+        // the vanilla sit-in runs ~4 s before any flag is set: the baseline is the snapshot from 6-8 s before
+        if (busy) {
+            if (!m_inSit && !m_ring.empty()) { m_inSit = true; m_seatT = 0; m_seatDone = false; m_base = m_ring.front(); Output::send<LogLevel::Verbose>(STR("[CampProbe] diff baseline frozen ({} props)\n"), m_base.size()); }
+            bool sm = m_cAct && !m_cAct->IsUnreachable() && BoolVar(m_cAct, STR("SeatedMode"));
+            if (m_inSit && sm && !m_seatDone) { if (m_seatT == 0) m_seatT = now; else if (now - m_seatT > 3000) { m_seatDone = true; LogDiff(pawn, L"diffSeated"); } }
+            m_idleSince = 0; return;
+        }
+        if (m_idleSince == 0) m_idleSince = now;
+        if (!m_inSit) { if (now - m_baseT > 2000) { m_ring.push_back(TakeSnap(pawn)); if (m_ring.size() > 4) m_ring.erase(m_ring.begin()); m_baseT = now; } return; }
+        if (now - m_idleSince < 3000) return;
+        LogDiff(pawn, L"diff");
+        m_inSit = false; m_ring.clear(); m_baseT = 0;
+    }
+
     auto on_update() -> void override {
         uint64_t now = GetTickCount64();
         Gaps(now);
@@ -422,6 +484,7 @@ public:
         }
         m_bPawn = pawn; m_bSeated = seated; m_bAct = m_cAct;
         if (pawn) Body(pawn, seated, now);
+        StateDiff(pawn, seated, now);
         if (seated != 1) { if (m_sitStart != 0) ScanContexts(STR("stand")); m_sitStart = 0; m_scans = 0; return; }
         if (m_sitStart == 0) m_sitStart = now;
         if (m_scans == 0 && now - m_sitStart >= 500) { m_scans = 1; ScanContexts(STR("sit+0.5s")); }

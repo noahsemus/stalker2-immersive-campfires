@@ -501,3 +501,17 @@ is `LastStarted`, set by `OnMontageStarted` (bound once per anim instance, tick 
 `Montage_IsActive`); rest start holds the item only if one is known (`Montage_SetPlayRate(None)` sets every active
 montage). Probe: Smokes from the backpack 1 transition (was 77). Noah: "looks great".
 
+## 2026-10-01 — builds 88-90: "can't save" after a sit (v1.0.1)
+
+Noah: after sitting and standing up, the game's "can't save now" notice. Build 88 (`ResetInteractionTarget`,
+`EnableInputAfterInteraction`, `RestoreStatesAfterInteraction` at the end of our stand-up): no change. Probe (property
+diff of the pawn, controller and their components, before the sit vs after standing): nothing stuck there, so the lock
+is outside them (not reflected). Build 89: stand-up through the vanilla exit, as the guitar hand-back does: actor and
+view to SeatYaw, seat point moved under us, `SetInteractionTarget(TargetSaved)`, skip the sit-down (3.93 s), press
+`IA_PlayerCAExit` with `InjectInputForAction` once it idles, run our end steps when the sit flag is off and the sit
+montage stopped (14 s fallback). Saving works. Tester: Skif stood a moment, sat, then stood up. Build 90: our seated
+pose is not stopped before the hand-back, and the sit montage is moved to 3.93 s inside the OnMontageStarted event
+(same frame it starts). Noah: "good works". A paste that calls a custom event of the same graph failed ("In use pin
+no longer exists"): drive the follow-up from the tick instead. A Vortex reinstall had left an untracked old copy
+(ABJ folder) that shadowed the test pak: parked in `Stalker2\_parked_mods\`.
+
