@@ -64,6 +64,10 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   trigger has actuation threshold 0.5 (IMC_Exploration 0.0); the override now sets 0.0 (build 99). Builds 93-98
   (input-mode re-grab, flush, one-frame pause, input delay, detector toggle) did nothing and were removed.
 
+Open requests: compatibility with **Player Gestures**' "sit anywhere" (Nexus 1674,
+https://www.nexusmods.com/stalker2heartofchornobyl/mods/1674; asked by a Nexus user, Noah: TBD). Start by inspecting
+how its sit works (its paks; is it a `PlayerContextualAction`-style sit or its own montage) before planning.
+
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
   Exclusive; W/A/S/D/Space/F/Esc = `IA_PlayerCAExit`). While any interaction is in progress native PDA / backpack /
