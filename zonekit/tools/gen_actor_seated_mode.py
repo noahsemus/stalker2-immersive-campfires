@@ -644,6 +644,7 @@ tick.pin("OutputDelegate", "delegate", out=True)
 tick.pins["OutputDelegate"].member_ref = f'MemberParent={ACTOR},MemberName="ReceiveTick"'
 tick.pin("then", "exec", out=True)
 tick.pin("DeltaSeconds", "real", subcat="float", out=True)
+
 tc = player_cast(300, 0, "tick", [tick["then"]])
 as_pc = tc["AsPC"]
 sq = Node(g, BG + "K2Node_ExecutionSequence", nm("K2Node_ExecutionSequence"), 600, 0, "tick steps")
@@ -1046,7 +1047,7 @@ for k, (prop, val) in enumerate([("ViewPitchMin", PITCH_MIN), ("ViewPitchMax", P
     lim.append(s)
 flag3 = other_set(PC, "bInContextualAction", "bool", X3 + 150, Y3 + 250, as_pc, "sit state off (on during a direct guitar try)", default="false")
 g.link(self_get("GuitarDirect", "bool", X3 + 50, Y3 + 400), flag3["bInContextualAction"])
-g.link(br3["then"], flag3["execute"])
+g.link(release(X3 - 300, Y3 - 3000, br3["then"], "watchdog (every seated tick)", True), flag3["execute"])
 g.link(flag3["then"], dis["execute"])
 chain(dis, *lim)
 # arms busy? PDA, backpack, or an action montage (food, drink, medkit, artifact: all in MainActionSlot)
@@ -1388,7 +1389,7 @@ g.link(spr["then"], brf["execute"])
 g.link(shd["then"], brn["execute"])
 sim2 = self_set("ItemMontage", "object", X3 + 2800, Y3 - 1000, "follow the newer item animation", sub=MONTCLS)
 g.link(cur_n, sim2["ItemMontage"])
-g.link(brn["then"], sim2["execute"])
+g.link(release(X3 + 2500, Y3 - 3600, brn["then"], "newer item", False), sim2["execute"])
 g.link(sim2["then"], brb["execute"])
 g.link(brn["else"], brb["execute"])
 cur_m = self_get("LastStarted", "object", X3 + 2450, Y3 - 450, sub=MONTCLS)   # build 87
@@ -2157,10 +2158,11 @@ g.link(eq_s["then"], sqSH["execute"])
 brBag = branch(XS + 10300, YS - 800, "stood up for the sleeping bag? (stay unarmed)", self_get("BagPending", "bool", XS + 10150, YS - 650))
 rti_e = member_call(PC, "ResetInteractionTarget", XS + 10200, YS - 1100, sc["AsPC"], "no interaction target (up)")
 eia_e = member_call(PC, "EnableInputAfterInteraction", XS + 10450, YS - 1100, sc["AsPC"], "input after the interaction (up)")
-g.link(lastr["then"], brBag["execute"])   # build 89: the vanilla exit restores the states
+# build 91: always up holstered (Nexus feedback: drawing the weapon on standing unnerved the NPCs around the fire):
+# the sleeping-bag path for every stand-up (weapon out of the hands, hand meshes shown again, no draw)
 g.link(brBag["else"], brSH["execute"])
-rwz = member_call(OBJC, "RemoveWeaponFromHands", XS + 10600, YS - 800, sc["AsPC"], "no weapon (sleeping bag)")
-g.link(brBag["then"], rwz["execute"])
+rwz = member_call(OBJC, "RemoveWeaponFromHands", XS + 10600, YS - 800, sc["AsPC"], "no weapon (up holstered)")
+g.link(lastr["then"], rwz["execute"])
 g.link(hands_hidden(XS + 10900, YS - 800, rwz["then"], sc["AsPC"], "false", "up for the bag")["then"], clr["execute"])
 g.link(sqSH["then_0"], lvl["execute"])
 chain(lvl, he1, he2, he3, yaw_on, rli, rmi)
@@ -2632,11 +2634,12 @@ g.link(sdn["then"], tmr["execute"])
 g.link(fe9["Completed"], self_set("SBMDone", "bool", X9 + 1750, Y9 + 2200, "ready for the next bag use", default="false")["execute"])
 
 # 9e (build 85): getting up for the bag: hands hold nothing visible (shown again when up)
-br9e = branch(X9 + 500, Y9 + 2400, "getting up for the bag?", b_and(X9 + 300, Y9 + 2550, self_get("BagPending", "bool", X9 + 100, Y9 + 2500),
-                                                                   self_get("Standing", "bool", X9 + 100, Y9 + 2600)))
+br9e = branch(X9 + 500, Y9 + 2400, "getting up? (build 91: always holstered)", self_get("Standing", "bool", X9 + 100, Y9 + 2600))
 g.link(sq9["then_4"], br9e["execute"])
 hands_hidden(X9 + 800, Y9 + 2400, br9e["then"], as_pc, "true", "getting up for the bag")
 
+# (builds 93-98: mouse re-grab / input flush / one-frame pause / input delay / detector toggle after the backpack:
+#  none of them helped; the cause was IMC_PlayerCA's mouse-look trigger threshold 0.5, fixed in the IMC override)
 # ---- 12 (build 89): stand-up through the vanilla exit ----
 X12, Y12 = 400, 18800
 g.box("EdGraphNode_Comment_917", X12 - 80, Y12 - 400, 4200, 1600, "Stand-up: the vanilla sit's own exit (the game finishes the sit)")

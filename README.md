@@ -19,7 +19,7 @@ seated and lets the game do all of it.
   end of every item and its weapon re-draw are kept out of view.
 - **Guitar** as in vanilla (G); put it away and you are seated again. The "Play the guitar" prompt no longer pops up.
 - **Clean stand-up.** Any movement key, jump, interact or Esc stands you up; no sliding, the body does not turn and
-  the view settles level and forward. Your weapon comes back.
+  the view settles level and forward. You stand up with the weapon holstered (draw it with your usual key).
 - **Your own key bindings** from Options > Controls work while seated.
 - **Sleeping Bag Mod compatible:** use the sleeping bag while seated to stand up, unarmed, and get its sleep window.
 

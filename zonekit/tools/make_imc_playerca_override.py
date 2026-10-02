@@ -13,6 +13,7 @@ What it does:
      mappable settings keeps each row's PlayerMappableOption name (OpenPDA, QuickSlot1,
      ...), so the player's Options > Controls rebinds reach the seated rows too. Rows
      with key None (the "Alt" slots) are kept: they carry the Alt mappable names;
+  2b. sets the mouse-look row's trigger threshold to 0.0 like IMC_Exploration (vanilla 0.5 dropped small movements);
   3. unless IMMCAMP_CANARY=0, adds the canary row IA_PlayerCAExit on BackSpace, so a
      test run can tell "override not loaded" from "action vetoed" (remove for release);
   4. saves the override. The temp asset is never saved; do NOT delete_asset it
@@ -116,6 +117,16 @@ try:
         log(f"  + {describe(nm)}")
         kept.append(nm); added += 1
     log(f"added {added} rows ({mappable} with mappable settings)")
+
+    # 2b. Mouse look: the vanilla row (IA_LookUp / Mouse2D, trigger Down) has actuation threshold 0.5, IMC_Exploration's
+    #     has 0.0. With this context in charge, mouse deltas that are small after the sensitivity drop out (small, slow
+    #     movements ignored, the view feels laggy; tester + Nexus user, v1.0.1). Match exploration.
+    for m in kept:
+        a_ = prop(m, "action"); k_ = prop(m, "key")
+        if a_ and a_.get_name() == "IA_LookUp" and str(k_.get_editor_property("key_name")) == "Mouse2D":
+            for t in prop(m, "triggers", []) or []:
+                log(f"  mouse look trigger {t.get_class().get_name()} threshold {t.get_editor_property('actuation_threshold')} -> 0.0")
+                t.set_editor_property("actuation_threshold", 0.0)
 
     # 3. Canary: a second stand-up key. No trigger = fires on press, like the vanilla rows.
     if CANARY:

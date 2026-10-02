@@ -13,7 +13,7 @@ Vanilla locks the campfire sit to a handful of keys. This mod keeps Skif seated 
 [*][b]Free look.[/b] The body and legs stay planted on the seat while you look around.
 [*][b]Natural arms.[/b] After an item the arms ease into the lap, with no reaching for an invisible weapon.
 [*][b]Guitar[/b] with G as usual; put it away and you are seated again. The "Play the guitar" prompt no longer pops up.
-[*][b]Clean stand-up:[/b] any movement key, jump, interact or Esc. No sliding, the body does not turn, the view settles forward, and your weapon comes back.
+[*][b]Clean stand-up:[/b] any movement key, jump, interact or Esc. No sliding, the body does not turn, the view settles forward, and you stand up holstered (no weapon drawn around the people at the fire).
 [*][b]Your own key bindings[/b] from Options > Controls work while seated.
 [*][b]Sleeping Bag Mod compatible:[/b] use the sleeping bag while seated to stand up, unarmed, and get its sleep window.
 [/list]

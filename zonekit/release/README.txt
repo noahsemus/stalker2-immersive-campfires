@@ -1,4 +1,4 @@
-Immersive Campfires v1.0.1 for S.T.A.L.K.E.R. 2: Heart of Chornobyl
+Immersive Campfires v1.0.2 for S.T.A.L.K.E.R. 2: Heart of Chornobyl
 Stay seated at the campfire: eat, drink, heal, open the PDA and backpack, play the guitar.
 No UE4SS required.
 
@@ -26,7 +26,7 @@ HOW TO USE
     - play the guitar (G, as in vanilla); put it away and you are seated again
     - look around freely; the body and legs stay put
   To get up, press any movement key, jump, interact or Esc. Skif stands up,
-  the view settles level and forward, and your weapon is back in your hands.
+  the view settles level and forward, and you stand with your weapon holstered.
   All of this uses your own key bindings from Options > Controls.
 
 SLEEPING BAG MOD

@@ -59,6 +59,11 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   sit montage starts at 3.93 s from the montage-started event (no sit-down frame; our pose stays on until then),
   `InjectInputForAction(IA_PlayerCAExit)` at idle, our end steps once the game's sit is over (tick step 12).
 
+- 2026-10-02 v1.0.2 (Noah: "IT'S FIXED"): stand up holstered (build 91, Nexus feedback); mouse look dropped small
+  movements while IMC_PlayerCA was in charge (also after a backpack item, even standing): its IA_LookUp/Mouse2D Down
+  trigger has actuation threshold 0.5 (IMC_Exploration 0.0); the override now sets 0.0 (build 99). Builds 93-98
+  (input-mode re-grab, flush, one-frame pause, input delay, detector toggle) did nothing and were removed.
+
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
   Exclusive; W/A/S/D/Space/F/Esc = `IA_PlayerCAExit`). While any interaction is in progress native PDA / backpack /

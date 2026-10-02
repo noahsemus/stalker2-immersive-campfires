@@ -392,6 +392,54 @@ public:
                 s_lastSum = now; s_upd = s_inputTicks = s_dropTicks = s_hitch = 0; s_maxDt = 0;
             }
         }
+        // build 92 ("look drops after a backpack item"): once a second while seated, the held / item montages and
+        // their play rates, so a montage left at rate ~0 shows up
+        {
+            static uint64_t s_lastM = 0;
+            if (m_bSeated == 1 && m_cAct && !m_cAct->IsUnreachable() && now - s_lastM >= 1000) {
+                s_lastM = now;
+                UObject* mesh = ObjProp(m_cPawn, STR("Mesh")); UObject* anim = nullptr;
+                if (mesh) if (UFunction* f = mesh->GetFunctionByNameInChain(FName(STR("GetAnimInstance")))) { struct { UObject* R = nullptr; } q; if (GuardedPE(mesh, f, &q)) anim = q.R; }
+                auto rate = [&](UObject* m) -> double {
+                    if (!anim || !m) return -9; UFunction* f = anim->GetFunctionByNameInChain(FName(STR("Montage_GetPlayRate"))); if (!f) return -8;
+                    struct { UObject* M; float R = 0; } q{ m }; return GuardedPE(anim, f, &q) ? q.R : -7; };
+                auto act = [&](UObject* m) -> int {
+                    if (!anim || !m) return -1; UFunction* f = anim->GetFunctionByNameInChain(FName(STR("Montage_IsActive"))); if (!f) return -2;
+                    struct { UObject* M; bool R = false; } q{ m }; return GuardedPE(anim, f, &q) ? (q.R ? 1 : 0) : -3; };
+                UObject* fm = ObjProp(m_cAct, STR("FrozenMontage")); UObject* im = ObjProp(m_cAct, STR("ItemMontage")); UObject* em = ObjProp(m_cAct, STR("EndedMontage")); UObject* ls = ObjProp(m_cAct, STR("LastStarted"));
+                auto nm = [](UObject* o) { return o ? o->GetName() : StringType(STR("-")); };
+                wchar_t b[600];
+                swprintf_s(b, 600, L"FM=%s act=%d rate=%.4f FrT=%.2f | IM=%s act=%d rate=%.4f | EM=%s act=%d | LS=%s act=%d rate=%.4f | PA=%d lookIgn=%d",
+                    nm(fm).c_str(), act(fm), rate(fm), DblVar(m_cAct, STR("FrozenT")), nm(im).c_str(), act(im), rate(im), nm(em).c_str(), act(em),
+                    nm(ls).c_str(), act(ls), rate(ls), BoolVar(m_cAct, STR("PoseAdditive")) ? 1 : 0, CallBool(ctl, STR("IsLookInputIgnored")));
+                Output::send<LogLevel::Verbose>(STR("[CampProbe] held {}\n"), StringType(b));
+            }
+        }
+        // build 95 ("small mouse movements dropped"): raw mouse delta (PlayerController.GetInputMouseDelta) vs view
+        // change, summed per second: small = samples with 0 < |delta| < 3 counts; lost = small samples with no view change
+        {
+            static UFunction* s_gmd = nullptr; static UObject* s_ctl = nullptr;
+            static int s_small = 0, s_lost = 0, s_moves = 0; static double s_abs = 0, s_rot = 0; static uint64_t s_t = 0; static float s_px = 0, s_py = 0; static FR s_pr{};
+            if (ctl != s_ctl) { s_ctl = ctl; s_gmd = ctl->GetFunctionByNameInChain(FName(STR("GetInputMouseDelta"))); }
+            if (s_gmd) {
+                struct { float X = 0, Y = 0; } q{};
+                if (GuardedPE(ctl, s_gmd, &q) && (q.X != s_px || q.Y != s_py)) {
+                    s_px = q.X; s_py = q.Y;
+                    double m = fabs(q.X) + fabs(q.Y);
+                    double r = fabs(cr.Y - s_pr.Y) + fabs(cr.P - s_pr.P);
+                    if (m > 0) { s_moves++; s_abs += m; s_rot += r; if (m < 3) { s_small++; if (r < 1e-5) s_lost++; } }
+                    s_pr = cr;
+                }
+            }
+            if (now - s_t >= 1000) {
+                if (s_moves) Output::send<LogLevel::Verbose>(STR("[CampProbe] mouse moves={} small={} smallLost={} sumDelta={} sumRot={} seated={}\n"), s_moves, s_small, s_lost, (int)s_abs, (int)(s_rot * 100), m_bSeated);
+                s_t = now; s_small = s_lost = s_moves = 0; s_abs = s_rot = 0;
+            }
+        }
+        { static int s_det = -9; int d = CallBool(m_cPawn, STR("IsDetectorInHands")); double fu = m_cAct && !m_cAct->IsUnreachable() ? DblVar(m_cAct, STR("DetFixUntil")) : -1;
+          static double s_fu = -9; if (d != s_det || fu != s_fu) { Output::send<LogLevel::Verbose>(STR("[CampProbe] detectorInHands={} DetFixUntil={} DetBefore={} t={}\n"), d, fu, m_cAct ? (BoolVar(m_cAct, STR("DetBefore")) ? 1 : 0) : -1, now % 100000); s_det = d; s_fu = fu; } }
+        { static int s_cur = -1; int c = BoolVar(ctl, STR("bShowMouseCursor")) ? 1 : 0; double rc = m_cAct && !m_cAct->IsUnreachable() ? DblVar(m_cAct, STR("ReCapT")) : -1;
+          static double s_rc = -2; if (c != s_cur || rc != s_rc) { Output::send<LogLevel::Verbose>(STR("[CampProbe] cursor={} ReCapT={} t={}\n"), c, rc, now % 100000); s_cur = c; s_rc = rc; } }
         int ign = CallBool(ctl, STR("IsLookInputIgnored"));
         if (ign != m_gIgnLook) { Output::send<LogLevel::Verbose>(STR("[CampProbe] lookIgnored={} t={}\n"), ign, now % 100000); m_gIgnLook = ign; }
     }
@@ -441,6 +489,30 @@ public:
         }
         Output::send<LogLevel::Verbose>(STR("[CampProbe] {} done: {} changed of {} (base {})\n"), tag, n, after.size(), m_base.size());
     }
+    // build 96 ("small mouse moves lost after a backpack item"): every reflected property of the pawn, controller,
+    // their components and the save managers: snapshot while the backpack is closed, diff 1.5 s after each close
+    Snap m_bagBase, m_bagLast; int m_bagPrev = 0; uint64_t m_bagSnapT = 0, m_bagCloseT = 0;
+    static bool Noisy(const StringType& n) {
+        for (const wchar_t* w : { L"Location", L"Rotation", L"Velocity", L"Time", L"Tick", L"Bounds", L"Transform", L"Acceleration",
+                                  L"Floor", L"BasedMovement", L"RootMotion", L"BodyInstance", L"Retarget", L"Sounds", L"InputVector", L"Timer", L"Surface", L"Height" })
+            if (n.find(w) != StringType::npos) return true;
+        return false;
+    }
+    void BagDiff(UObject* pawn, uint64_t now) {
+        if (!pawn || pawn->IsUnreachable()) return;
+        int bag = CallBool(pawn, STR("IsUsingBackpack")) == 1 ? 1 : 0;
+        if (!bag && !m_bagCloseT && now - m_bagSnapT > 2000) { m_bagLast = TakeSnap(pawn); m_bagSnapT = now; }
+        if (bag && !m_bagPrev) { m_bagBase = m_bagLast; m_bagCloseT = 0; }
+        if (!bag && m_bagPrev) m_bagCloseT = now;
+        m_bagPrev = bag;
+        if (m_bagCloseT && now - m_bagCloseT > 1500 && !m_bagBase.empty()) {
+            Snap after = TakeSnap(pawn); int n = 0;
+            for (auto& a : after) { if (Noisy(a.first)) continue;
+                for (auto& b : m_bagBase) if (a.first == b.first) { if (a.second != b.second) { Output::send<LogLevel::Verbose>(STR("[CampProbe] diffBag {} : {} -> {}\n"), a.first, b.second, a.second); ++n; } break; } }
+            Output::send<LogLevel::Verbose>(STR("[CampProbe] diffBag done: {} changed\n"), n);
+            m_bagCloseT = 0; m_bagSnapT = 0;
+        }
+    }
     void StateDiff(UObject* pawn, int seated, uint64_t now) {
         if (!pawn || pawn->IsUnreachable()) return;
         bool busy = seated == 1 || (m_cAct && !m_cAct->IsUnreachable() && (BoolVar(m_cAct, STR("VanillaHold")) || BoolVar(m_cAct, STR("Standing")) || BoolVar(m_cAct, STR("SeatedMode"))));
@@ -485,6 +557,7 @@ public:
         m_bPawn = pawn; m_bSeated = seated; m_bAct = m_cAct;
         if (pawn) Body(pawn, seated, now);
         StateDiff(pawn, seated, now);
+        BagDiff(pawn, now);
         if (seated != 1) { if (m_sitStart != 0) ScanContexts(STR("stand")); m_sitStart = 0; m_scans = 0; return; }
         if (m_sitStart == 0) m_sitStart = now;
         if (m_scans == 0 && now - m_sitStart >= 500) { m_scans = 1; ScanContexts(STR("sit+0.5s")); }

@@ -515,3 +515,17 @@ pose is not stopped before the hand-back, and the sit montage is moved to 3.93 s
 no longer exists"): drive the follow-up from the tick instead. A Vortex reinstall had left an untracked old copy
 (ABJ folder) that shadowed the test pak: parked in `Stalker2\_parked_mods\`.
 
+## 2026-10-02 — builds 91-99: holstered stand-up, lost small mouse movements (v1.0.2)
+
+Build 91: every stand-up ends like the sleeping-bag one (RemoveWeaponFromHands, hand meshes shown, no draw; hands
+hidden while getting up) after a Nexus user's report (drawing the weapon unnerved the NPCs). Noah: works.
+Mouse: after using an item from the backpack (and on after standing up) small, slow mouse movements were ignored until
+Esc or a normal backpack close (Noah, a Nexus user). Builds 92-98 chased it: frozen-item watchdog (no frozen item was
+ever left), SetInputMode_GameOnly re-grab (+flush, x2), UIOnly->GameOnly focus cycle, SetInputDelay(0), detector put-away
+(the probe's property diff showed a detector reference appear in SecondaryItemInHands, but IsDetectorInHands stayed 0),
+one-frame SetGamePaused: no change. Probe measure that settled it: GetInputMouseDelta vs ControlRotation, per second:
+from the backpack item on, ~all deltas under 3 counts gave no rotation. Cause: IMC_PlayerCA's IA_LookUp/Mouse2D row
+has an InputTriggerDown with actuation threshold 0.5 (IMC_Exploration: 0.0); whenever that context handles the mouse,
+small deltas after ApplySensitivity are below it. Build 99: threshold 0.0 in the override (make_imc_playerca_override.py
+step 2b); band-aids removed. Noah: "IT'S FIXED".
+
