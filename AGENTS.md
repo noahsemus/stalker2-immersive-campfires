@@ -110,4 +110,4 @@ before a paste that needs them.
 
 ## Release (only when the tester says "cut a release")
 Follow `harness/docs/pipeline.md` § Release; test matrix in `PLAN.md` includes the pad and the coexistence test
-with ImmersiveDialogue. Remove the canary row first. Nexus page: _(record the mod id here once it exists)_.
+with ImmersiveDialogue. Remove the canary row first. Nexus page: mod 2894, https://www.nexusmods.com/stalker2heartofchornobyl/mods/2894 (author account geoffjeffrey).
