@@ -529,3 +529,13 @@ has an InputTriggerDown with actuation threshold 0.5 (IMC_Exploration: 0.0); whe
 small deltas after ApplySensitivity are below it. Build 99: threshold 0.0 in the override (make_imc_playerca_override.py
 step 2b); band-aids removed. Noah: "IT'S FIXED".
 
+## 2026-10-03 — builds 100-101: Sleeping Bag Mod window after the vanilla-exit stand-up (v1.0.3)
+
+Noah (v1.0.2): bag used while seated -> stood up, then nothing. Probe: our steps all ran (BagPending, stand-up via the
+vanilla exit, its Config found, `K2_SetTimer(Config, "On Widget Init")`), its window never existed. Build 100 (calls at
+0.6 s and 2.6 s): same. Read its Config with zen_kismet: its tick reads `SBM_RTPC_Use` (round == 1), resets it, runs
+"On Item Use" (needs its "Can Use Item"), which checks `SBM_RTPC_Location` (0 = retry later, 1/2/3 = allowed) and opens
+the window. Build 101: after standing, `SetRTPCValue(Location, 1)` + `SetRTPCValue(Use, 1)` on the player; probe:
+its widget `SBM_WSleep_Widget_C` exists ~0.8 s later; Location restored after 4 s. Noah: works, sleep confirmed.
+UE4SS could not read its spaced Blueprint variable names (`Is Using Widget`: property not found).
+

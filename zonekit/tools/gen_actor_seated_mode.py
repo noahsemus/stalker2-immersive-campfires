@@ -2535,6 +2535,28 @@ g.link(ldr["then"], rcast["execute"])
 suse = self_set("SBMUse", "object", X9 + 3600, Y9, "the bag-use RTPC", sub=AKRTPC)
 g.link(rcast["AsAkRtpc"], suse["SBMUse"])
 g.link(rcast["then"], suse["execute"])
+cvl = lib_pure(KSL, "KismetSystemLibrary", "Conv_SoftObjPathToSoftObjRef", X9 + 3700, Y9 + 300,
+               [("SoftObjectPath", "struct", dict(sub=SOP)), ("ReturnValue", "softobject", dict(sub=OBJ, out=True))])
+cvl.pins["SoftObjectPath"].ref = True
+cvl.pins["SoftObjectPath"].const = True
+g.link(soft_path(X9 + 3500, Y9 + 300, "/Sleeping_Bag/RTPC/SBM_RTPC_Location.SBM_RTPC_Location"), cvl["SoftObjectPath"])
+ldl = exec_pins(Node(g, BG + "K2Node_CallFunction", nm("K2Node_CallFunction"), X9 + 3850, Y9, "its location RTPC",
+                     [f"FunctionReference=(MemberParent={KSL},MemberName=\"LoadAsset_Blocking\")"]))
+ldl.pin("self", "object", sub=KSL, hidden=True, extra='DefaultObject="/Script/Engine.Default__KismetSystemLibrary",')
+ldl.pin("Asset", "softobject", sub=OBJ)
+ldl.pin("ReturnValue", "object", sub=OBJ, out=True)
+g.link(cvl["ReturnValue"], ldl["Asset"])
+g.link(suse["then"], ldl["execute"])
+lcast = exec_pins(Node(g, BG + "K2Node_DynamicCast", nm("K2Node_DynamicCast"), X9 + 4200, Y9, "an RTPC?", [f"TargetType={AKRTPC}"]))
+lcast.pin("CastFailed", "exec", out=True)
+lcast.pin("Object", "object", sub=OBJ)
+lcast.pin("AsAkRtpc", "object", sub=AKRTPC, out=True)
+lcast.pin("bSuccess", "bool", out=True)
+g.link(ldl["ReturnValue"], lcast["Object"])
+g.link(ldl["then"], lcast["execute"])
+sloc = self_set("SBMLoc", "object", X9 + 4550, Y9, "its location RTPC", sub=AKRTPC)
+g.link(lcast["AsAkRtpc"], sloc["SBMLoc"])
+g.link(lcast["then"], sloc["execute"])
 
 # 9b: not seated: look up again next sit (if the mod was not there yet)
 br9b = branch(X9 + 500, Y9 + 600, "not seated?", b_and(X9 + 300, Y9 + 800, b_not(X9 + 100, Y9 + 800, self_get("SeatedMode", "bool", X9 - 100, Y9 + 800)),
@@ -2629,9 +2651,60 @@ tmr.pin("FunctionName", "string", extra='DefaultValue="On Widget Init",')
 tmr.pin("Time", "real", subcat="float", extra='DefaultValue="0.200000",')
 tmr.pin("bLooping", "bool", extra='DefaultValue="false",')
 tmr.pin("ReturnValue", "struct", sub="\"/Script/CoreUObject.ScriptStruct'/Script/Engine.TimerHandle'\"", out=True)
-g.link(fe9["Array Element"], tmr["Object"])
-g.link(sdn["then"], tmr["execute"])
-g.link(fe9["Completed"], self_set("SBMDone", "bool", X9 + 1750, Y9 + 2200, "ready for the next bag use", default="false")["execute"])
+# build 100: tester, v1.0.2: "I just stand up and nothing happens". Since build 89 the stand-up runs the vanilla
+# exit, which finishes (input contexts, interaction state) around the moment our end steps run; one 0.2 s call could
+# land while that is still settling. Now: remember its Config, ask at 0.6 s and again 2 s later (its On Widget Init
+# ignores a second call while its popup is open: "Is Using Widget").
+scf = self_set("SBMConfig", "object", X9 + 2250, Y9 + 1500, "its Config actor", sub=ACTOR)
+g.link(fe9["Array Element"], scf["SBMConfig"])
+g.link(sdn["then"], scf["execute"])
+g.link(self_get("SBMConfig", "object", X9 + 2100, Y9 + 1900, sub=ACTOR), tmr["Object"])
+tmr.pins["Time"].extra = 'DefaultValue="0.600000",'
+dn9 = self_set("SBMDone", "bool", X9 + 1750, Y9 + 2200, "ready for the next bag use", default="false")
+g.link(fe9["Completed"], dn9["execute"])
+cv9 = is_valid(X9 + 1950, Y9 + 2400, self_get("SBMConfig", "object", X9 + 1800, Y9 + 2400, sub=ACTOR))
+brcv = branch(X9 + 2000, Y9 + 2200, "found its Config?", cv9)
+g.link(dn9["then"], brcv["execute"])
+# build 101: build 100's two "On Widget Init" calls opened nothing (probe: its popup never came). Let the mod see a
+# normal bag use instead: its location RTPC = 1 (a campfire) and its bag-use RTPC = 1 on the player; its own tick
+# then runs its use path and opens its popup. Its location value goes back 4 s later.
+gl9 = lib_call(AKGS, "AkGameplayStatics", "GetRTPCValue", X9 + 2250, Y9 + 2600, "its location now", [
+    ("RTPCValue", "object", dict(sub=AKRTPC)), ("PlayingID", "int", dict(extra='DefaultValue="0",')),
+    ("InputValueType", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/AkAudio.ERTPCValueType'\"", extra='DefaultValue="GameObject",')),
+    ("Value", "real", dict(subcat="float", out=True)),
+    ("OutputValueType", "byte", dict(sub="\"/Script/CoreUObject.Enum'/Script/AkAudio.ERTPCValueType'\"", out=True)),
+    ("Actor", "object", dict(sub=ACTOR))], "/Script/AkAudio.Default__AkGameplayStatics")
+gl9.pins["RTPCValue"].const = True
+g.link(self_get("SBMLoc", "object", X9 + 2100, Y9 + 2800, sub=AKRTPC), gl9["RTPCValue"])
+g.link(as_pc, gl9["Actor"])
+g.link(brcv["then"], gl9["execute"])
+so9 = self_set("SBMLocOld", "real", X9 + 2550, Y9 + 2600, "remember it", subcat="double")
+g.link(gl9["Value"], so9["SBMLocOld"])
+g.link(gl9["then"], so9["execute"])
+
+
+def set_rtpc(x, y, var, value_pin, default, comment):
+    n = lib_call(AKGS, "AkGameplayStatics", "SetRTPCValue", x, y, comment, [
+        ("RTPCValue", "object", dict(sub=AKRTPC)), ("Value", "real", dict(subcat="float", extra=f'DefaultValue="{default}",')),
+        ("InterpolationTimeMs", "int", dict(extra='DefaultValue="0",')), ("Actor", "object", dict(sub=ACTOR))], "/Script/AkAudio.Default__AkGameplayStatics")
+    n.pins["RTPCValue"].const = True
+    g.link(self_get(var, "object", x - 150, y + 250, sub=AKRTPC), n["RTPCValue"])
+    g.link(as_pc, n["Actor"])
+    if value_pin is not None:
+        g.link(value_pin, n["Value"])
+    return n
+
+
+sl9 = set_rtpc(X9 + 2800, Y9 + 2600, "SBMLoc", None, "1.000000", "at a campfire (for the mod)")
+g.link(so9["then"], sl9["execute"])
+su9 = set_rtpc(X9 + 3050, Y9 + 2600, "SBMUse", None, "1.000000", "the bag used (the mod takes it)")
+g.link(sl9["then"], su9["execute"])
+g.link(su9["then"], tmr["execute"])
+dl9 = delay(X9 + 2550, Y9 + 2200, 4.0, "then its location back")
+g.link(tmr["then"], dl9["execute"])
+sb9 = set_rtpc(X9 + 2850, Y9 + 2200, "SBMLoc", self_get("SBMLocOld", "real", X9 + 2700, Y9 + 2400, subcat="double"), "0.000000", "its location as it was")
+g.link(dl9["then"], sb9["execute"])
+
 
 # 9e (build 85): getting up for the bag: hands hold nothing visible (shown again when up)
 br9e = branch(X9 + 500, Y9 + 2400, "getting up? (build 91: always holstered)", self_get("Standing", "bool", X9 + 100, Y9 + 2600))

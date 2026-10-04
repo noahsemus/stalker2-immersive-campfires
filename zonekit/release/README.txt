@@ -1,4 +1,4 @@
-Immersive Campfires v1.0.2 for S.T.A.L.K.E.R. 2: Heart of Chornobyl
+Immersive Campfires v1.0.3 for S.T.A.L.K.E.R. 2: Heart of Chornobyl
 Stay seated at the campfire: eat, drink, heal, open the PDA and backpack, play the guitar.
 No UE4SS required.
 

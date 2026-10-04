@@ -243,6 +243,11 @@ public:
         if (!o) return false; FProperty* p = o->GetPropertyByNameInChain(n); FBoolProperty* bp = p ? CastField<FBoolProperty>(p) : nullptr;
         uint8_t* raw = p ? p->ContainerPtrToValuePtr<uint8_t>(o) : nullptr; return bp && raw && bp->GetPropertyValue(raw);
     }
+    // -1 no object, -2 no such property, else 0/1
+    static int BoolOr(UObject* o, const wchar_t* n) {
+        if (!o || o->IsUnreachable()) return -1; FProperty* p = o->GetPropertyByNameInChain(n); FBoolProperty* bp = p ? CastField<FBoolProperty>(p) : nullptr;
+        if (!bp) return -2; uint8_t* raw = p->ContainerPtrToValuePtr<uint8_t>(o); return raw && bp->GetPropertyValue(raw) ? 1 : 0;
+    }
     static double DblVar(UObject* o, const wchar_t* n) {
         if (!o) return 0; FProperty* p = o->GetPropertyByNameInChain(n); double* v = p ? p->ContainerPtrToValuePtr<double>(o) : nullptr; return v ? *v : 0;
     }
@@ -435,6 +440,27 @@ public:
                 if (s_moves) Output::send<LogLevel::Verbose>(STR("[CampProbe] mouse moves={} small={} smallLost={} sumDelta={} sumRot={} seated={}\n"), s_moves, s_small, s_lost, (int)s_abs, (int)(s_rot * 100), m_bSeated);
                 s_t = now; s_small = s_lost = s_moves = 0; s_abs = s_rot = 0;
             }
+        }
+        // build 100 (Sleeping Bag Mod popup after standing): our flags and its Config's flags, on every change
+        {
+            static UObject* s_cfg = nullptr; static uint64_t s_cfgT = 0;
+            if ((!s_cfg || s_cfg->IsUnreachable()) && now - s_cfgT > 5000) { s_cfgT = now; s_cfg = UObjectGlobals::FindFirstOf(STR("Config_C")); }
+            static StringType s_last; static int s_pop = -1; static uint64_t s_popT = 0;
+            if (now - s_popT > 1000) { s_popT = now; UObject* w = UObjectGlobals::FindFirstOf(STR("SBM_WSleep_Widget_C")); s_pop = (w && !w->IsUnreachable()) ? 1 : 0; }
+            StringType line = STR("BagPending=") + std::to_wstring(m_cAct ? BoolVar(m_cAct, STR("BagPending")) : -1)
+                + STR(" SBMDone=") + std::to_wstring(m_cAct ? BoolVar(m_cAct, STR("SBMDone")) : -1)
+                + STR(" Standing=") + std::to_wstring(m_cAct ? BoolVar(m_cAct, STR("Standing")) : -1)
+                + STR(" Seated=") + std::to_wstring(m_cAct ? BoolVar(m_cAct, STR("SeatedMode")) : -1)
+                + STR(" ExitPending=") + std::to_wstring(m_cAct ? BoolVar(m_cAct, STR("ExitPending")) : -1)
+                + STR(" ExitInjected=") + std::to_wstring(m_cAct ? BoolVar(m_cAct, STR("ExitInjected")) : -1)
+                + STR(" VanillaHold=") + std::to_wstring(m_cAct ? BoolVar(m_cAct, STR("VanillaHold")) : -1)
+                + STR(" SBMConfig=") + (m_cAct && ObjProp(m_cAct, STR("SBMConfig")) ? ObjProp(m_cAct, STR("SBMConfig"))->GetName() : StringType(STR("-")))
+                + STR(" | cfg=") + (s_cfg ? s_cfg->GetName() : StringType(STR("none")))
+                + STR(" UsingWidget=") + std::to_wstring(BoolOr(s_cfg, STR("Is Using Widget")))
+                + STR(" CanUseItem=") + std::to_wstring(BoolOr(s_cfg, STR("Can Use Item")))
+                + STR(" UsingBackpack=") + std::to_wstring(BoolOr(s_cfg, STR("Is Using Backpack")))
+                + STR(" popup=") + std::to_wstring(s_pop);
+            if (line != s_last) { s_last = line; Output::send<LogLevel::Verbose>(STR("[CampProbe] sbm {} t={}\n"), line, now % 100000); }
         }
         { static int s_det = -9; int d = CallBool(m_cPawn, STR("IsDetectorInHands")); double fu = m_cAct && !m_cAct->IsUnreachable() ? DblVar(m_cAct, STR("DetFixUntil")) : -1;
           static double s_fu = -9; if (d != s_det || fu != s_fu) { Output::send<LogLevel::Verbose>(STR("[CampProbe] detectorInHands={} DetFixUntil={} DetBefore={} t={}\n"), d, fu, m_cAct ? (BoolVar(m_cAct, STR("DetBefore")) ? 1 : 0) : -1, now % 100000); s_det = d; s_fu = fu; } }

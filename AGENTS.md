@@ -64,6 +64,11 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
   trigger has actuation threshold 0.5 (IMC_Exploration 0.0); the override now sets 0.0 (build 99). Builds 93-98
   (input-mode re-grab, flush, one-frame pause, input delay, detector toggle) did nothing and were removed.
 
+- 2026-10-03 v1.0.3 (Noah: "nice it works"): Sleeping Bag Mod while seated broke in v1.0.1 (stood up, no window):
+  `K2_SetTimer(Config, "On Widget Init")` no longer opened it (build 100: two calls, probe: no window). Build 101:
+  after standing, its location RTPC = 1 and its bag-use RTPC = 1 on the player; its own tick opens the window
+  (~0.8 s); location restored 4 s later. One direct call kept as a backup.
+
 Open requests: compatibility with **Player Gestures**' "sit anywhere" (Nexus 1674,
 https://www.nexusmods.com/stalker2heartofchornobyl/mods/1674; asked by a Nexus user, Noah: TBD). Start by inspecting
 how its sit works (its paks; is it a `PlayerContextualAction`-style sit or its own montage) before planning.
