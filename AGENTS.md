@@ -72,6 +72,10 @@ harness on 2026-09-30. Sibling of `stalker2-immersive-dialogue`, which shipped t
 Open requests: compatibility with **Player Gestures**' "sit anywhere" (Nexus 1674,
 https://www.nexusmods.com/stalker2heartofchornobyl/mods/1674; asked by a Nexus user, Noah: TBD). Start by inspecting
 how its sit works (its paks; is it a `PlayerContextualAction`-style sit or its own montage) before planning.
+Open report (2026-10-06, Nexus user bulaike0725): PDA does not open while seated, with "Fast Backpack and Fast PDA"
+(Nexus 1505: overrides `MG_fp_pda`, `MG_fp_pda_fast`, `MG_fp_backpack_inventory`, same slots and notifies) and
+"PDA-tweaks". Checked: no shared assets with us; Noah with Fast PDA + PDAToolsX (Nexus 1951) installed: the PDA opens
+seated. Waiting for the user's full mod list and key.
 
 ## Key facts (verified; details in `zonekit/README.md`)
 - Campfire sit = `PlayerContextualAction` actor + `PC.bInContextualAction` + input context `IMC_PlayerCA` (priority
