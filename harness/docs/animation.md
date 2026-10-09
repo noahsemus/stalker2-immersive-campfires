@@ -102,3 +102,25 @@ Mostly from ImmersiveDialogue 2.0-2.1 (walk in dialogue, arms, gestures) and Imm
   DefaultGroup, FullBody = FullBodyGroup (a montage in one group does not stop the others).
 - A dynamic pose-table montage starts at frame 0 unless `InTimeToStartMontageAt` is set: blend it in from the right
   frame or the first frames blend a wrong pose.
+
+## Left-hand actions over any weapon (Looting research 2026-10-09, headless read of the layer AnimBPs)
+- Every weapon layer has a `LeftHand` slot behind `left_hand_blend_mask` (jnt_l_shoulder to the fingers, local-space
+  rotation), after MainActionSlot / UpperBody, chained RightHand → LeftHand → CameraSlot → DefaultSlot:
+  `AnimBP_PlayerWeaponLayer` (all firearms, `WeaponSlotsLayer`), `AnimBP_player_bh`, `AnimBP_Player_Knife`,
+  `AnimBP_Player_fp_bolt`, `AnimBP_Player_fp_F1`, `AnimBP_Player_TwoHandedItem`, `AnimBP_PlayerDetectorLayer`
+  (weighted by `DetectorData.bIsLeftHandSlotEnabled`). In `AnimBP_Player` itself LeftHand appears only in the guitar
+  state. Slot group of LeftHand = the default group (with DefaultSlot, WeaponSlot, RightHand, CameraSlot).
+- The left hand is held on the foregrip by `TwoBoneIK_GSC` (jnt_l_hand → `jnt_weapon`, alpha
+  `HandsIKData.LeftHand.Alpha`, skipped while `StateData.bIsLeftHandBusy`), applied **after** the LeftHand slot. Montages
+  switch it with `AnimNotify_HandIK` (HandToApply LeftHand; defaults Start 0 / End 0 / 0.2 s cubic = off; End 1 = on).
+  Rifle / pistol LeftHand montages bracket themselves with an off and an on notify; a dynamic montage of a bare
+  sequence has no notifies, so the hand stays glued to the grip.
+- GSC's per-stance left-hand gestures: `Flashlight/Montages/MG_fp_<stance>_flashlight` and
+  `NightVisionGoggles/Montages/MG_FP_Player_*_NVG-SwitchOn/Off_01` (LeftHand + WeaponSlot + CameraSlot), the
+  injector `Items/Antirad/MG_fp_antirad_use`, `ar/common/showhide/lefthand/MG_fp_remove_left_hand_from_item` /
+  `MG_fp_return_left_hand_on_item` (the latter turns HandIK on at 0.136 s: recovery for a cut left-hand montage).
+- Unused vanilla left-hand **grab with a rifle held**: `ar/ak74/MG_fp_ak74_weapon_grab` (= gp37) on
+  `ar/common/grabitem/fp_ar_weapon_grab`, 1.667 s, LeftHand, only the left arm moves (camera still). Firearm anim
+  collections have a `WeaponAnimations.PickUpItem` field for it, filled only for the grenade-launcher AK / gp37.
+- Left-hand item point: bone `jnt_l_weapon` (child of `jnt_l_hand`; the game's `AttachItem PickingUpItem` socket).
+  `jnt_item` / `jnt_unequipped_item` / `jnt_camera` are root children, not hand bones.

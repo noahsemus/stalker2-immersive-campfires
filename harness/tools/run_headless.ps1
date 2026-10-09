@@ -14,6 +14,10 @@ $pre = & $py -c "import os, sys; sys.path.insert(0, r'$PSScriptRoot'); from hcon
 [IO.File]::WriteAllText($tmp, ($pre -join "`n") + "`n" + [IO.File]::ReadAllText((Resolve-Path $Script)), (New-Object Text.UTF8Encoding $false))
 $log = "$env:TEMP\harness_headless.log"
 Write-Host "Running $Script headless for $Mod (log: $log) ..."
+# The editor writes to stderr (e.g. "ChromaSDKPlugin failed to load!"); under PowerShell 5.1 with "Stop" that aborts
+# this script before the summary, although the commandlet keeps running. It also exits 1 on its usual 2 log errors.
+$ErrorActionPreference = "Continue"
 & $EditorCmd "$Uproject" -run=pythonscript "-script=$tmp" -unattended -nosplash -stdout -NoShaderCompile *> $log
+$ErrorActionPreference = "Stop"
 Write-Host "Exit $LASTEXITCODE. Script lines:"
 Select-String -Path $log -Pattern "\[harness\]|Error|EXCEPTION|Traceback" | Select-Object -Last 60 | ForEach-Object { $_.Line }

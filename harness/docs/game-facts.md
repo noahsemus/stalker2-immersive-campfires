@@ -107,3 +107,26 @@ mod learns something about the game itself. Line numbers refer to `<kit>\bp_api_
 - The dialogue skip hint `W_SkipHintView` has native show logic (`SkipHintView` base); the BP is layout + fade only.
 - Trading opens inside the dialogue (`IsInStaticDialog` stays true) and takes UI-only input.
 - No BP-exposed API opens the PDA / inventory views directly (nothing on UIManagerEx / ViewBase / CppMediator).
+
+## Pickup and looting (Looting research, 2026-10-09; kit only, not yet probed)
+- Every loose item in the world is one of two generic actors, `BP_StaticItemContainer_C` /
+  `BP_SkeletalItemContainer_C` (`/Game/GameLite/Blueprints/Interactable/ItemContainers/`, `CoreVariables.cfg`
+  `StaticItemContainer` / `SkeletalItemContainer`), parent `InteractableItemContainer` (line 3751); visual in its
+  `MeshComponent`, interaction in a native `ItemContainerInteractionComponent` plus `ItemContainerHold`. Item cfg
+  `MeshPrototypeSID` → `MeshPrototypes.cfg` `MeshPath` is the world mesh; the item's own `MeshPath` is the
+  first-person hand mesh.
+- Pickup of a loose item is instant (no anim collection on the container BPs). Already animated in vanilla:
+  artifacts (`BP_Artifact` → `AnimCollection_PickupArtifact` → `MG_FP_Player_AR/Det_ArtifactPickup_01`,
+  MainActionSlot, forces `AnimBP_Player_TwoHandedItem`), mutant parts (`MutantLootAnimCollection(WithoutWidget)`,
+  `UseMutantLootWithoutWidget = true` → `MG_fp_bh_creaturestash_looting_common`), body carry
+  (`MG_fp_dead_body_pickup`). Corpse search and stashes only open the loot window.
+- `IA_Interact` (`InputActions/Delayable/`) is mapped in `IMC_Interactivity` (F / gamepad face-left, priority High,
+  `InputMappingContextPrototypes.cfg:229-235`), not `IMC_Exploration`; tap vs hold is native (`HoldTime`,
+  `HoldPreventFromDefaultInteractionPercent`).
+- `PC.get_interaction_target()` (5193) → `InteractionComponent` under the crosshair; `get_interacted_actor` /
+  `get_interacted_component` (5191-5192). `InteractionComponent` (3823) has delegates `on_interacted_event`,
+  `on_end_interacted_event`, `on_notify_interact_event`, `on_montage_ended`; `HoldComponent` (3553)
+  `on_hold_started/finished/interrupted_event` (BlueprintAssignable or not: unchecked).
+- No BP-visible "item added to inventory" event (`ItemManager` has no members; quest `OnPlayerGetItem` needs a fixed
+  item SID; the pawn's `on_next_item_to_take_set_bp` needs a pawn override). The pickup sound
+  (`PlayerItemsSounds.sfx_pick_up` → `SFX_Item_Pickup`) is posted natively.

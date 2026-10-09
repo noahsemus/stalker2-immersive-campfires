@@ -12,6 +12,10 @@ conflict with every other mod shipping that asset, and whichever loses loses *al
 
 ## Checking a conflict
 - `tools/pak/scan_mods.py <AssetName> ...` lists every installed container that mentions it and its mount order.
+  It reliably finds containers that **ship** the asset, but under-reports mere **references**: cooked packages
+  import other packages by path hash, so a plain-text hit is missing (Player Gestures' `Config` imports
+  `IMC_Exploration`, seen with `zen_names.py --imports`, yet the scan shows 0). Read zero hits as "nobody overrides
+  it", not "nobody uses it".
 - Extract a container (`UnrealPak <x>.utoc -Extract <scratch>`) and read `zen_names.py` (names) / `--imports`.
 - Shared assets seen in the wild: `AnimBP_Player` (ZoneWatch/ZST, WRP-type animation mods, S-Watch),
   `BP_Stalker2Character` (Slop yCam, ImmersiveDialogue ≤ 2.1), `IMC_Exploration` (Immersive HUD, ZST),
@@ -34,9 +38,21 @@ conflict with every other mod shipping that asset, and whichever loses loses *al
   soft hangs during sequences (sleep).
 - **UObjectCacheMod** (UE4SS Lua): caches objects, rebuilds on transitions; probes must load before it.
 - **Better Vaulting, grEdit**: examples of cfg `_patch_` style mods.
-- **Player Gestures** (Nexus 1674, https://www.nexusmods.com/stalker2heartofchornobyl/mods/1674): has a "sit
-  anywhere". Not yet inspected; users asked Campfires to support its sit (2026-10-02). Scan its paks
-  (`pak/scan_mods.py`, `zen_names.py`) before designing anything.
+- **Player Gestures** (Nexus 1674, https://www.nexusmods.com/stalker2heartofchornobyl/mods/1674, v2.2.1): overrides
+  no vanilla asset (override container = its `WorldSubsystemData`, an `ActorPatchesData`, a cook anchor). NewContent
+  `/Player_Gestures/` + `S2Dev_Library`; its `Config` actor plays gestures in `PreActionFullbodySlot`, weapon
+  stances (lowered / raised / cover) in `WeaponSlot`, and "sit anywhere" with its own copy of the bonfire montage
+  (`PG_MG_fp_ca_gd_bonfire`, with the `InteractAction` notify). Hooks the pawn's hand events (`On Return Left Hand On
+  Main Item`, `On Hide Main Item`, `On Equip Main / Support / Two Hand Item`, `On Handle Aim Input`); hard-imports
+  MCM; reads `IMC_Exploration`, `IMC_Inventory`, `IMC_Menu`, PDA contexts (Looting research 2026-10-09).
+- **Looting / animation speed mods** (Looting research 2026-10-09; none installed on the dev box): Faster Looting
+  (2406) and Lootable Zone (1495) shift-hover loot in the window; Loot Take All Close (2671, UE4SS); Ultimate
+  Customization Tool (2733) auto-loots bodies and loose items with no interaction; Mutant Looting SpeedUp (1916),
+  Fast Mutant loot (1727), Sota Classic Mutant Loot (1923, bpatches `CoreVariables` `MutantLootAnimCollection` /
+  `UseMutantLootWithoutWidget`); **No Wasted Movement** (2718) edits 1,407 vanilla montages (interactables, chests,
+  backpack, body pickup); Quick Container and Inventory (2007) moves backpack / container notifies; Faster backpack
+  (84). Players favour fast / skippable animations: keep added animations short and non-blocking, reuse vanilla
+  montages by reference instead of overriding them.
 
 - **OXA** (Nexus 939): bpatches `WeaponReloadTimePerAttachment` and more for many weapons, adds ~27 weapons with their
   own arrays, `ReloadTime_Minus*` effects on magazines, and **overrides 38 vanilla `AnimCollection_fp_*`** (the
