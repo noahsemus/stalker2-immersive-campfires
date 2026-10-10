@@ -40,6 +40,11 @@ because breaking it once cost whole test cycles. "The tester" is the person you 
   first look for our own game-thread stall (log timestamp gap > 50 ms around the state change) or a probe bug.
 - Keep iterating on hard problems with different approaches in the same session. "Parking" or "deferring" is their
   call, never the agent's. Stop only on "stop", "move on", "skip it".
+- **Never offer dropping, skipping or disabling a feature (or a case of it) as an option or a recommendation.** Every
+  option you present is a way to make it work; whether to cut scope is only theirs to say (Looting 2026-10-10: "no
+  touch with a weapon out (recommended)" was rightly rejected).
+- What they see is the ground truth. When a report and the probe disagree, restate their observation first and fix
+  exactly that; use the probe only to explain why.
 - At the first regression, roll back to the last tagged checkpoint; mirror their editor work into the repo first so
   nothing they did is lost.
 

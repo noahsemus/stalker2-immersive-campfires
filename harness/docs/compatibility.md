@@ -71,18 +71,30 @@ Read from the installed containers with `zen_names.py` (2026-09-30):
   FloatControllerStepValue, header textures).
 - `BPI_MCM_SettingsProvider`: `RegisterMCMSettings`, `RegisterMCMDefaultSettings`, `ApplyMCMSettings`,
   `OnMCMButtonPressed`.
-- `Enums/E_MCM_SettingType`: bool, float, int, string, vector, rotator, transform, key, combobox, button.
-- Discovery: `BP_MCM_Manager` calls `GetAllActorsWithInterface` and calls the provider interface on each, so **a
-  provider is any spawned actor implementing `BPI_MCM_SettingsProvider`**. Values persist in the save game
-  (`MWS_MCM` subsystem, `SG_MCM_Settings`).
-- Author guide (Notion) and an "MCM Example Mod" are linked from the Nexus / Steam Workshop pages.
+- `Enums/E_MCM_SettingType` (cooked display names, verified 2026-10-10): 0 Bool, 1 Int, 2 Float, 3 String,
+  4 Transform, 5 Vector, 6 Rotator, 7 ComboBox, 8 Keybind, 9 Button. `GetModSetting`'s int output is `IntegerValue`.
+  The provider events' parameter is named `BPI MCM API` (with spaces).
+- Discovery: `MWS_MCM` spawns `BP_MCM_Manager` only in `WorldMap_WP`; ~5 s after a load (and on saves) it calls
+  `GetAllActorsWithInterface(BPI_MCM_SettingsProvider)` and on each: `RegisterMCMSettings(manager)`,
+  `RegisterMCMDefaultSettings`, `ApplyMCMSettings`. Every click in the menu calls `SetModSetting` and then
+  `ApplyMCMSettings` on EVERY provider (no Apply button). So a provider is any spawned actor implementing the
+  interface. `RegisterModSetting` only adds a (ModID, SettingID) not stored yet (the saved value wins);
+  `GetModSetting` on an unknown setting returns defaults (bool = false): guard Apply with a "registered" flag, or
+  another mod's click switches your default-on bool off. Values persist in the save game (`ST_MCM_Save.AllSettings`).
+- Installed providers seen (2026-10-10): ZST's `BP_ZoneWatch` and PointOfNoReturn HUD MaskOverlay's
+  `BP_TempMCM_MaskOverlay` (`.uplugin` dependency `{"Name": "ModConfigurationMenu", "Enabled": true, "Optional": true}`),
+  Player Gestures and Sleeping Bag Mod `Config` actors (dependency not optional). All ship it inside the main plugin,
+  so a NewContent Blueprint referencing another plugin's assets cooks and loads when the `.uplugin` lists that plugin.
+- Kit setup: the kit has no MCM assets. The author's Notion guide links the modder package `MCMModder2_0.7z`
+  (Google Drive): an uncooked `ModConfigurationMenu` stub plugin (interfaces + enum) and `MCM_ModExample1`. Copy both
+  into `<kit>\Stalker2\Mods\` with the editor closed; never select or cook the stub (never bundle MCM). Copy the
+  "(Message)" API nodes from the example (search often picks the wrong ones); feed `ComboBoxOptions` an array with
+  one empty string.
 
-Rule: a Blueprint that implements or calls these interfaces hard-imports `/ModConfigurationMenu/...` and fails to
-load without MCM (Immersive HUD's actor does this). So the main mod keeps settings as variables with defaults and
-imports nothing from MCM; an optional `<Mod>MCM` plugin spawns the provider and writes values into the main mod's
-actor. Open: whether a NewContent Blueprint in one plugin can reference another plugin's class and survive the cook
-(untested; fallback = ship an MCM variant of the whole mod). Compiling needs MCM's interface assets in the kit (its
-source plugin in `<kit>\Stalker2\Mods\`, from the example mod / guide).
+Design: settings as variables with defaults on the mod's runtime actor; a small provider actor (implements the
+interface, spawned by the mod's subsystem) registers them and writes them into the runtime actor on Apply. With the
+dependency `Optional`, test once with MCM disabled before release (untested; fallback = a separate `<Mod>MCM` plugin as
+an optional download).
 
 ### Sleeping Bag Mod (Nexus 1642)
 Its `Config` actor (`/Sleeping_Bag/Config`, instance `Config_C_<n>`) polls the bag-use RTPC

@@ -103,6 +103,17 @@ Mostly from ImmersiveDialogue 2.0-2.1 (walk in dialogue, arms, gestures) and Imm
 - A dynamic pose-table montage starts at frame 0 unless `InTimeToStartMontageAt` is set: blend it in from the right
   frame or the first frames blend a wrong pose.
 
+## First-person arms are drawn squeezed toward the view axis (Looting build 4, kit materials)
+The arm / hand materials (`M_MasterHands` → `MF_ForegroundWithShadowSwitch` → `MF_Foreground`) move every vertex in
+the vertex shader: `MF_Foreground_FOVCorrection` scales the sideways part (perpendicular to the camera forward) of the
+camera-relative position by `s = tan(view hFOV / 2) / MPC_FOV.TanFOV` (`View.ClipToView[0][0]` / the arms' tangent),
+then `MF_Foreground_AntiDepthClipping` scales the whole camera-relative position by `MPC_FOV.DepthScale` (0.225;
+screen position unchanged). Bones and sockets are NOT moved: a normal world mesh placed at a hand bone shows up further
+out than the hand (off screen at the edges). To place a world object where a bone is SEEN:
+`C + F*dot(F, P) + (P - F*dot(F, P)) * lerp(1, s, MPC_FOV.IsFOVEnabled)` with `P = bone - C`, `C` / `F` the camera
+location / forward (`PlayerCameraManager`), and scale it by the same `s`. `MPC_FOV` =
+`/Game/_Stalker_2/Materials/MPC/MPC_FOV` (TanFOV, DepthScale, IsFOVEnabled, CurrentFOV, DisplayFOV).
+
 ## Left-hand actions over any weapon (Looting research 2026-10-09, headless read of the layer AnimBPs)
 - Every weapon layer has a `LeftHand` slot behind `left_hand_blend_mask` (jnt_l_shoulder to the fingers, local-space
   rotation), after MainActionSlot / UpperBody, chained RightHand → LeftHand → CameraSlot → DefaultSlot:
@@ -122,5 +133,28 @@ Mostly from ImmersiveDialogue 2.0-2.1 (walk in dialogue, arms, gestures) and Imm
 - Unused vanilla left-hand **grab with a rifle held**: `ar/ak74/MG_fp_ak74_weapon_grab` (= gp37) on
   `ar/common/grabitem/fp_ar_weapon_grab`, 1.667 s, LeftHand, only the left arm moves (camera still). Firearm anim
   collections have a `WeaponAnimations.PickUpItem` field for it, filled only for the grenade-launcher AK / gp37.
+- **The arm bones do not follow the view pitch** (Looting b4-b11 probe traces, empty hands): only `jnt_camera` pitches.
+  A left-arm pose played in `LeftHand` that is right looking straight ahead ends ~50 cm above the view axis when
+  looking 30 deg down. A reach meant to land somewhere on screen needs one pose per view pitch (or per item elevation):
+  a table of segments in one sequence, started with `InTimeToStartMontageAt` and stopped with `Montage_Stop`.
+- The empty-handed spine differs a lot from the rifle stance: the same left-arm locals put the hand ~40 cm higher.
+  Solve left-arm poses on the stance's own spine (`fp_bh_idle_stand` matched the in-game rest hand to 1 cm).
+- **With a weapon in hand the whole arm rig follows the view** (the weapon layer pitches `jnt_spine_03` with the
+  look-vertical additive): a hand position relative to `jnt_camera` in a sequence is its position in view axes in
+  game, whatever the view pitch (ImmersiveLooting 2026-10-10, three traces). Measured hand-bone landing for a planned
+  camera-relative point: ahead + 8.4 cm, right x 1.14 + 4.0, up x 1.15 + 2.0 (the sideways scale ~ the arms' FOV
+  squeeze). With **empty hands the arms stay in the body frame** (do not follow the pitch): aim per view pitch there.
+- **Rifles with an underbarrel idle type pin the left hand**: `AnimBP_PlayerWeaponLayer` → `WeaponUnderbarrelIdleLayer`
+  blends the `GripIdle` pose over the left arm with weight `FirearmData.LeftHandCurveValueInverse` = 1 - the montage
+  curve `left_hand_curve`. A `LeftHand` montage without that curve plays (slot active, position advancing) but the hand
+  never leaves the grip. The game's own left-hand gestures (`MG_fp_ar_flashlight`, NVG) carry `left_hand_curve`
+  (0 → 1 in 0.17 s, held, back to 0 ~0.25 s before the end): add it to any mod-made LeftHand sequence
+  (`AnimationLibrary.add_curve` + `add_float_curve_keys`).
+- A 180 s "pose table" sequence (many segments, `InTimeToStartMontageAt`) works in the bh layer; over a rifle the
+  same form never showed (cause not isolated; the curve may have been the whole reason). Many short sequences
+  (one per bin) cook to ~15 KB each and are a safe alternative.
+- With empty hands the left-hand IK still pulls a `LeftHand` montage's hand toward the grip point (`jnt_weapon`, just
+  right of centre): a default `AnimNotify_HandIK` (LeftHand, End 0) at the start keeps it off; a "back on" one (End 1)
+  makes the hand jump there.
 - Left-hand item point: bone `jnt_l_weapon` (child of `jnt_l_hand`; the game's `AttachItem PickingUpItem` socket).
   `jnt_item` / `jnt_unequipped_item` / `jnt_camera` are root children, not hand bones.

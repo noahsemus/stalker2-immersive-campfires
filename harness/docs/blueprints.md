@@ -18,6 +18,20 @@ of 20-200 nodes (event graphs and anim graphs).
 4. They compile and save; read it back with `export_t3d.py` to verify (the export lists deleted-but-not-GC'd nodes
    too: trust each graph's `Nodes(n)` list).
 
+**Readable paste layout (tester-approved, Looting 2026-10-10: "best layout so far"):** call `graph.layout_tree()`
+before writing. It
+- clones every pure node that feeds more than one pin (pure nodes are re-evaluated per use anyway), so each data
+  input sits right next to the node that uses it;
+- inside each comment box runs the exec chain left to right on a row, each exec node's data inputs as a small tree
+  directly to its left; Branch false / Sequence then_1.. open rows below; chains longer than `max_row` wrap;
+- places the boxes along the flow: a box entered from another box sits to its right, boxes fed by one box are
+  stacked in the order of the pins that feed them, unfed boxes (events) start new groups; boxes are resized to fit.
+Generator rules that keep it readable: put every exec node inside a comment box (hand coordinates only choose the
+box; an input event and its chain need a box of their own), and never wire one exec output (a cast's `As X`, a
+spawn's `Return Value`) to many places: store it in a variable right after the exec node and read the variable at
+each use (`self_get` creates one getter per use), or the wires fan out across the whole graph. `layout()` (a plain
+column grid) is kept only for comparison; it was harder to follow.
+
 Put `NodeComment` labels and comment boxes in the generated text (see `collaboration.md`). Keep mod-specific
 generators in the mod's `zonekit/tools/gen_*.py`; lift reusable node builders into `bp_graph.py` here.
 
@@ -29,6 +43,34 @@ generators in the mod's `zonekit/tools/gen_*.py`; lift reusable node builders in
 - **Don't call a custom event of the same graph from pasted text**: the paste asks to "Fix Self Context Function
   References" and the compile fails ("In use pin no longer exists"). Drive the follow-up from the tick (a flag or a
   timestamp checked each tick) instead.
+
+- **ForEachLoop paste**: `K2Node_MacroInstance` with `MacroGraphReference=(MacroGraph="/Script/Engine.EdGraph'/Engine/
+  EditorBlueprintResources/StandardMacros.StandardMacros:ForEachLoop'",GraphBlueprint=...StandardMacros'",
+  GraphGuid=99DBFD5540A796041F72A5A9DA655026)` (GUID read from the kit's `Engine/Content/EditorBlueprintResources/
+  StandardMacros.uasset`), `ResolvedWildcardType=(PinCategory="object",PinSubCategoryObject=<class>)`, pins `Exec`,
+  `Array` (container Array), `LoopBody`, `Array Element`, `Array Index`, `Completed`.
+- Function purity after a paste comes from the UFunction (`bDefaultsToPureFunc`), not the pasted `bIsPureFunc`:
+  write `const` getters (BlueprintCallable const = pure) without exec pins and static library calls with them, or the
+  reconstructed node drops the exec links.
+- **A pasted call to a BlueprintInternalUseOnly function is silently dropped** (no error, its links vanish): e.g.
+  `KismetMathLibrary` `Ease` / `VEase` / `REase` belong to the `K2Node_EaseFunction` node. Ease by hand
+  (`alpha * alpha` + `VLerp`). After every paste, export the graph and compare node and link counts with the
+  generated text (match by function + comment, not node name: the editor renames nodes that collide with deleted,
+  not yet garbage-collected ones).
+- Static library functions are impure unless declared BlueprintPure: e.g. `KismetMaterialLibrary.GetScalarParameterValue`
+  pasted without exec pins compiles with "was pruned because its Exec pin is not connected" and reads 0. Put such calls
+  in the exec chain and keep their results in variables.
+- **Cast output pin names use the class display name with spaces**: `AsInput Mapping Context`,
+  `AsInteractable Item Container`, `AsDead Body` (a misspelled pin silently drops its links).
+- From Git Bash, `ue_exec.py --arg ASSET=/Mod/...` gets its path rewritten to `C:/Program Files/Git/Mod/...` (MSYS
+  path conversion): run it from PowerShell or with `MSYS_NO_PATHCONV=1`.
+- `ue_exec.py`: UE's remote execution treats a command as a FILE path when its text contains `<something>.py`
+  early (e.g. a docstring saying "run with ue_exec.py ..."): "Could not load Python file". Keep `.py` names out of
+  the first lines of scripts sent with it. A script that raises leaves its previous output file in place: delete the
+  output before the run, or you read stale results.
+- `UUserWidget::GetWidgetFromName` is not Blueprint-callable in 5.5; native widget members bound with BindWidget are
+  usually not BP-visible either. Find a child widget by `GetAllWidgetsOfClass(<its class>, TopLevelOnly=false)` +
+  `GetPathName` contains `<Parent>.WidgetTree.<Child>` (once, on an edge).
 
 Blueprint "Float" variables are doubles. `BlueprintEditorLibrary.add_member_variable` adds variables from Python;
 `reparent_blueprint` reparents; Blueprint graphs themselves cannot be authored from Python (only pasted).

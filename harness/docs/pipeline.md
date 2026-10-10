@@ -38,6 +38,11 @@ each cook. The editor's Package Mod edits the kit copy itself.
 - `GSCCookMod` runs two passes ~2 min apart: `-modcooknewcontent` (NewPackages) and `-modcookoverridecontent
   -CookAgainstFixedBase -IgnoreMissingReferences` (OverridePackages).
 - **The cook takes everything in the mod's `Content` folder** regardless of the lists. Keep only files meant to ship.
+- **A mod package in neither list is cooked into BOTH containers**: into NewContent under its plugin path and into
+  the override container as a game-path override (`Stalker2/Content/<folder>/<Asset>`, shipped in `zzz_<Mod>_N_P`).
+  ImmersiveLooting 2026-10-10: 25 unlisted animation assets made the override pak 1 KB -> 308 KB (extracted and
+  listed with UnrealPak -Extract). After adding assets to a plugin, add them to NewPackages.txt (the kit copy is what
+  the cook reads) and check the override container only holds what it should.
 - **A package in both lists is cooked into neither.** (`cook_and_install.ps1` warns.)
 - **An override-pass Blueprint keeps references only to packages the base game has** (or overrides of them). A pin
   or variable pointing at a mod-only asset compiles in the editor and is silently nulled in the cook, no log line.

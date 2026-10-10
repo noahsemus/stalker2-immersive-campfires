@@ -130,3 +130,10 @@ mod learns something about the game itself. Line numbers refer to `<kit>\bp_api_
 - No BP-visible "item added to inventory" event (`ItemManager` has no members; quest `OnPlayerGetItem` needs a fixed
   item SID; the pawn's `on_next_item_to_take_set_bp` needs a pawn override). The pickup sound
   (`PlayerItemsSounds.sfx_pick_up` → `SFX_Item_Pickup`) is posted natively.
+- The loot window is the backpack view: corpse search, world stashes, the player's own stash and the I key all open
+  `W_Inventory` (parent native `InventoryNew`; `CoreVariables.cfg` `InventoryWidgetClass`) with input context
+  `IMC_Inventory` (Exclusive); traders use `W_Trade` / `IMC_Trade`. The widget BP has no logic (open, take, take all,
+  drag/drop are native). A mod can see "window open" with `EnhancedInputLocalPlayerSubsystem.HasMappingContext`
+  and read the weight texts (`...InventoryWidget / LootGridWidget → WeightBar → CurrentWeightText`, `W_Text_C`,
+  `TextWidget.GetText`) by finding them by path name. World stashes (`BP_Stash*`) are subclasses of the item
+  container actors; the own stash is a native `PlayerStash` (Looting research 2026-10-09, kit only).
