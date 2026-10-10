@@ -111,3 +111,12 @@ deployed folder; deployed files are hardlinks into Vortex staging (copying over 
 UE4SS DLL mods it strips `enabled.txt` and writes `mods.txt` only from its "UE4SS Load Order" tab after the user
 touches it. Vortex redeploys can rewrite `mods.txt` and remove hand-installed probe folders: re-check after any
 Vortex activity.
+
+### Steam Workshop (optional, the tester's clicks)
+The Zone Kit uploads by itself (strings in `Stalker2ModEditor-Win64-Shipping.exe`, `ModKitSteamWorkshopManager`;
+`DefaultEngine.ini [SteamWorkshop]` app id 1643320): toolbar button **Steam Workshop Upload** → "Upload mod to Steam
+Workshop", choose new item or update an existing one, title, description, visibility (Public / Friends / Private /
+Unlisted), thumbnail (< 1 MB). It cooks the mod currently picked in the toolbar mod selector and uploads that, so the
+kit must hold exactly the released state (deploy `main` first if it doesn't). Needs Steam running, the game owned in
+that Steam account, write access to the kit folder. "Item with current name exists already" = choose update instead.
+Testing a Workshop copy and a Nexus/Vortex copy of the same mod at once loads it twice: keep one.
